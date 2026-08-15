@@ -34,7 +34,16 @@ class InstallationIntegrationTests(unittest.TestCase):
             shutil.copytree(
                 ROOT,
                 repo,
-                ignore=shutil.ignore_patterns(".git", "__pycache__", "results", "output", "build-manifest.json"),
+                ignore=shutil.ignore_patterns(
+                    ".git",
+                    "__pycache__",
+                    "results",
+                    "output",
+                    "build-manifest.json",
+                    "bundle-checksums.sha256",
+                    "bundle-info.json",
+                    "corresponding-source",
+                ),
             )
             (repo / "results").mkdir()
             (repo / "results/.gitkeep").touch()
