@@ -172,6 +172,8 @@ stop_journal_follower() {
     fi
     journal_pid=''
 }
+# Called indirectly by signal traps.
+# shellcheck disable=SC2329
 forward_signal() {
     local signal_name=$1
     local signal_status=$2
@@ -182,6 +184,8 @@ forward_signal() {
         exit "$signal_status"
     fi
 }
+# Called indirectly by the EXIT trap.
+# shellcheck disable=SC2329
 finalize_on_exit() {
     local saved_status=$?
     trap - EXIT HUP INT TERM

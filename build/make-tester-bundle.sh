@@ -125,12 +125,14 @@ value = {
 output.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
+checksum_staging="$stage_root/bundle-checksums.sha256"
 (
     cd -- "$bundle_dir"
     find . -type f ! -name bundle-checksums.sha256 -print0 \
         | sort -z | xargs -0 sha256sum \
-        | sed 's#  \./#  #' >bundle-checksums.sha256
+        | sed 's#  \./#  #' >"$checksum_staging"
 )
+mv -- "$checksum_staging" "$bundle_dir/bundle-checksums.sha256"
 python3 "$bundle_dir/tools/verify-tester-bundle.py" --root "$bundle_dir"
 archive="$release_dir/$bundle_name.tar.gz"
 [[ ! -e $archive ]] || { printf 'error: release archive already exists: %s\n' "$archive" >&2; exit 1; }
