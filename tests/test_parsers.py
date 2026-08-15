@@ -65,6 +65,15 @@ class Vkd3dParserTests(unittest.TestCase):
             region["shaders"],
             [{"hash": "0123456789abcdef", "stage": "20"}],
         )
+        self.assertEqual(
+            region["events"],
+            [
+                "shader:0123456789abcdef:20",
+                "command:dispatch",
+                "arg:80",
+                "command:barrier",
+            ],
+        )
         self.assertRegex(region["fingerprint"], r"^[0-9a-f]{64}$")
 
     def test_extracts_only_breadcrumb_report(self) -> None:
@@ -81,6 +90,22 @@ class Vkd3dParserTests(unittest.TestCase):
         )
         self.assertEqual(result["regions"][0]["commands"], ["draw_indexed"])
         self.assertFalse(result["regions"][0]["complete_delimiters"])
+
+    def test_resource_cookie_values_do_not_prevent_region_matching(self) -> None:
+        first = parse_vkd3d_log(
+            "Reporting NVIDIA checkpoints for direct queue 0.\n"
+            "===== Potential crash region BEGIN =====\n"
+            "Cookie: 1 (#1)\nCommand: dispatch\n"
+            "===== Potential crash region END =====\n"
+        )["regions"][0]
+        second = parse_vkd3d_log(
+            "Reporting NVIDIA checkpoints for direct queue 0.\n"
+            "===== Potential crash region BEGIN =====\n"
+            "Cookie: 999 (#3e7)\nCommand: dispatch\n"
+            "===== Potential crash region END =====\n"
+        )["regions"][0]
+        self.assertNotEqual(first["events"], second["events"])
+        self.assertEqual(first["fingerprint"], second["fingerprint"])
 
 
 if __name__ == "__main__":

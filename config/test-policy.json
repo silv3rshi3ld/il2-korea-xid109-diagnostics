@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "no_xid_observation_seconds": 600,
+  "recommended_case_order": [
+    "baseline",
+    "single-queue",
+    "no-descriptor-buffer",
+    "sync"
+  ],
+  "workload": "Use the same known-failing IL-2 Korea hangar scene and unchanged graphics settings for every case. Start timing when the hangar is fully rendered."
+}

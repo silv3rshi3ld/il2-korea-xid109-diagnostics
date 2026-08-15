@@ -93,6 +93,7 @@ if [[ -n $source_status ]]; then
         exit 1
     fi
     if [[ $(git -C "$source_dir" diff --name-only) != 'libs/vkd3d/breadcrumbs.c' ]] ||
+        [[ $(git -C "$source_dir" diff --numstat) != $'9\t4\tlibs/vkd3d/breadcrumbs.c' ]] ||
         grep -qv '^ M libs/vkd3d/breadcrumbs.c$' <<<"$source_status"; then
         printf 'error: source checkout contains changes beyond the diagnostic patch\n' >&2
         exit 1
@@ -169,6 +170,7 @@ if [[ -e $source_dir/subprojects/.wraplock ]] &&
 fi
 source_status=$(git -C "$source_dir" status --porcelain)
 if [[ $(git -C "$source_dir" diff --name-only) != 'libs/vkd3d/breadcrumbs.c' ]] ||
+    [[ $(git -C "$source_dir" diff --numstat) != $'9\t4\tlibs/vkd3d/breadcrumbs.c' ]] ||
     grep -qv '^ M libs/vkd3d/breadcrumbs.c$' <<<"$source_status"; then
     printf 'error: build produced unexpected source-tree changes\n' >&2
     git -C "$source_dir" status --short >&2

@@ -22,7 +22,8 @@ case ${1:-} in
             'After one representative diagnostic Xid 109 failure, use:' \
             '  ./tools/collect-nvidia-report.sh --run' \
             '' \
-            'That mode will clearly prompt before running sudo nvidia-bug-report.sh.'
+            'That mode will clearly prompt before running sudo nvidia-bug-report.sh.' \
+            'The report is broad and privacy-sensitive; send it separately and privately.'
         exit 0
         ;;
     --run) ;;
@@ -45,6 +46,9 @@ timestamp=$(date -u +%Y-%m-%dT%H%M%SZ)
 output_base="$report_dir/nvidia-bug-report-$timestamp.log"
 printf 'About to run this explicit privileged command:\n'
 printf '  sudo nvidia-bug-report.sh --output-file %q\n' "$output_base"
+printf '%s\n' \
+    'It can take several minutes. If sudo asks for your password, typed characters are not displayed.' \
+    'This report is excluded from the ordinary PRIVATE results archive.'
 printf 'Continue? [y/N] '
 IFS= read -r answer
 case $answer in
@@ -63,4 +67,6 @@ else
     output=$output_base
 fi
 printf 'NVIDIA report saved to: %s\n' "$output"
-printf '%s\n' 'Review it for private information before sharing.'
+printf '%s\n' \
+    'Never post this report publicly. Send it separately through the agreed private channel' \
+    'only when the investigation coordinator requested it.'

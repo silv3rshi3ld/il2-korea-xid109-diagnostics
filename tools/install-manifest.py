@@ -27,9 +27,15 @@ def main() -> int:
     parser.add_argument("--original-core", type=pathlib.Path, required=True)
     parser.add_argument("--diagnostic-core", type=pathlib.Path, required=True)
     parser.add_argument("--build-manifest", type=pathlib.Path, required=True)
+    parser.add_argument("--terms-acceptance", type=pathlib.Path, required=True)
     parser.add_argument("--harness-commit", required=True)
     args = parser.parse_args()
 
+    acceptance: dict[str, str] = {}
+    for line in args.terms_acceptance.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, item = line.split("=", 1)
+            acceptance[key] = item
     value = {
         "schema_version": 1,
         "installed_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -44,6 +50,7 @@ def main() -> int:
             "build_manifest_sha256": sha256(args.build_manifest),
         },
         "harness_git_commit": args.harness_commit,
+        "tester_notice": acceptance,
         "installed_components": [
             "files/lib/wine/vkd3d-proton/x86_64-windows/d3d12core.dll",
             "proton wrapper",

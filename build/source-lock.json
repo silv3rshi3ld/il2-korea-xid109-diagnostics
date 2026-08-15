@@ -28,7 +28,7 @@
   "patches": [
     {
       "path": "build/patches/0001-label-nvidia-checkpoint-queues.patch",
-      "sha256": "de27f33b859a3f232802c5513a7395f812f4a4777e5710ccbc9872fb070b9cd4",
+      "sha256": "40933324b9e33079dd95197cc0fe34b857e21225aed427c6db8786afa4f51297",
       "purpose": "Report-only labeling of direct, compute, and copy checkpoint queues"
     }
   ]

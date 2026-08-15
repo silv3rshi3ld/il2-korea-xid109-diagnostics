@@ -9,7 +9,6 @@ import json
 import os
 import pathlib
 import shutil
-import socket
 from datetime import datetime, timezone
 from typing import Any
 
@@ -52,6 +51,7 @@ def file_sha256(path: pathlib.Path) -> str:
 def command_init(args: argparse.Namespace) -> int:
     build_manifest = load_json(args.build_manifest, {})
     source_lock = load_json(REPO_ROOT / "build/source-lock.json", {})
+    policy = load_json(REPO_ROOT / "config/test-policy.json", {})
     metadata = {
         "schema_version": 1,
         "app_id": 247970,
@@ -67,9 +67,11 @@ def command_init(args: argparse.Namespace) -> int:
         "start_utc": args.start,
         "end_utc": None,
         "duration_seconds": None,
+        "no_xid_observation_target_seconds": policy.get("no_xid_observation_seconds", 600),
         "proton_exit_code": None,
         "capture_complete": False,
-        "host": socket.gethostname(),
+        "capture_interrupted": False,
+        "recovered_after_interruption": False,
         "harness_git_commit": args.harness_commit,
         "failing_build_lock": source_lock.get("failing_proton", {}),
         "diagnostic_build": build_manifest,
@@ -84,6 +86,8 @@ def command_finish(args: argparse.Namespace) -> int:
     metadata["duration_seconds"] = args.duration
     metadata["proton_exit_code"] = args.exit_code
     metadata["capture_complete"] = True
+    metadata["capture_interrupted"] = args.interrupted
+    metadata["recovered_after_interruption"] = args.recovered
     metadata["capture_warnings"] = args.warning
     atomic_json(args.metadata, metadata)
     return 0
@@ -172,7 +176,12 @@ def command_summary(args: argparse.Namespace) -> int:
     metadata = load_json(run_dir / "metadata.json", {})
     xid_data = load_json(run_dir / "xid-events.json", {"events": []})
     events = xid_data.get("events", [])
-    xid109 = [event for event in events if event.get("xid") == 109]
+    xid109 = [
+        event
+        for event in events
+        if event.get("xid") == 109
+        and str(event.get("name") or "").casefold() == "il2series.exe"
+    ]
     vkd3d_text = (run_dir / "vkd3d.log").read_text(encoding="utf-8", errors="replace") \
         if (run_dir / "vkd3d.log").is_file() else ""
     proton_text = (run_dir / "proton.log").read_text(encoding="utf-8", errors="replace") \
@@ -191,6 +200,8 @@ def command_summary(args: argparse.Namespace) -> int:
         f"- VK_ERROR_DEVICE_LOST/device removed: {'yes' if vkd3d['device_lost'] or proton['device_lost'] else 'no'}",
         f"- Breadcrumb crash regions: {len(regions)}",
         f"- Dumped shaders: {len(load_json(run_dir / 'shader-manifest.json', {'shaders': []}).get('shaders', []))}",
+        f"- Capture interrupted/recovered: "
+        f"{'yes' if metadata.get('capture_interrupted') or metadata.get('recovered_after_interruption') else 'no'}",
     ]
     if xid109:
         event = xid109[0]
@@ -243,7 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--metadata", type=pathlib.Path, required=True)
     finish.add_argument("--end", required=True)
     finish.add_argument("--duration", type=int, required=True)
-    finish.add_argument("--exit-code", type=int, required=True)
+    finish.add_argument("--exit-code", type=int)
+    finish.add_argument("--interrupted", action="store_true")
+    finish.add_argument("--recovered", action="store_true")
     finish.add_argument("--warning", action="append", default=[])
     finish.set_defaults(func=command_finish)
 

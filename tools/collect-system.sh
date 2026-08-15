@@ -13,9 +13,8 @@ output_file="$output_dir/system.txt"
 
 {
     printf 'collected_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'hostname=%s\n' "$(hostname 2>/dev/null || printf unavailable)"
     printf '\n[uname]\n'
-    uname -a || true
+    uname -srmo || true
     printf '\n[os-release]\n'
     if [[ -r /etc/os-release ]]; then
         while IFS= read -r line; do
@@ -26,14 +25,14 @@ output_file="$output_dir/system.txt"
     fi
     printf '\n[nvidia-smi]\n'
     if command -v nvidia-smi >/dev/null 2>&1; then
-        nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,vbios_version \
+        timeout 20s nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,vbios_version \
             --format=csv,noheader || true
     else
         printf 'unavailable\n'
     fi
     printf '\n[vulkan-summary]\n'
     if command -v vulkaninfo >/dev/null 2>&1; then
-        vulkaninfo --summary 2>&1 || true
+        timeout 30s vulkaninfo --summary 2>&1 || true
     else
         printf 'unavailable\n'
     fi

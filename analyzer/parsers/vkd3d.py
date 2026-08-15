@@ -26,6 +26,9 @@ SHADER_RE = re.compile(
     r"\bhash:\s*(?P<hash>[0-9A-Fa-f]{8,16}),\s*stage:\s*(?P<stage>[0-9A-Fa-f]+)",
     re.IGNORECASE,
 )
+ARG_RE = re.compile(r"\bSet arg:\s*(?P<decimal>\d+)\s*\(#(?P<hex>[0-9A-Fa-f]+)\)")
+COOKIE_RE = re.compile(r"\bCookie:\s*(?P<decimal>\d+)\s*\(#(?P<hex>[0-9A-Fa-f]+)\)")
+TAG_RE = re.compile(r"\bTag:\s*(?P<value>.+?)\s*$")
 BEGIN = "Potential crash region BEGIN"
 END = "Potential crash region END"
 REPORT_BEGIN = "Device lost observed, analyzing breadcrumbs"
@@ -33,9 +36,13 @@ REPORT_END = "Done analyzing breadcrumbs"
 
 
 def _fingerprint(region: dict[str, Any]) -> str:
+    normalized_events = [
+        "cookie:*" if event.startswith("cookie:") else event
+        for event in region["events"]
+    ]
     payload = {
-        "commands": region["commands"],
-        "shaders": [item["hash"] for item in region["shaders"]],
+        "queue": region.get("queue"),
+        "events": normalized_events,
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -79,6 +86,7 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
                 "checkpoint": dict(pending) if pending else None,
                 "commands": [],
                 "shaders": [],
+                "events": [],
                 "raw_lines": [line],
                 "complete_delimiters": False,
             }
@@ -93,6 +101,7 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
             value = command.group("value").strip().lower().replace(" ", "_")
             if value not in {"top_marker", "bottom_marker", "set_shader_hash"}:
                 region["commands"].append(value)
+                region["events"].append(f"command:{value}")
         shader = SHADER_RE.search(line)
         if shader:
             item = {
@@ -101,6 +110,16 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
             }
             if item not in region["shaders"]:
                 region["shaders"].append(item)
+            region["events"].append(f"shader:{item['hash']}:{item['stage']}")
+        argument = ARG_RE.search(line)
+        if argument:
+            region["events"].append(f"arg:{int(argument.group('hex'), 16):x}")
+        cookie = COOKIE_RE.search(line)
+        if cookie:
+            region["events"].append(f"cookie:{int(cookie.group('hex'), 16):x}")
+        tag = TAG_RE.search(line)
+        if tag:
+            region["events"].append(f"tag:{tag.group('value').strip()}")
         if END in line:
             region["end_line"] = line_number
             region["complete_delimiters"] = True

@@ -29,6 +29,7 @@ class AnalyzerIntegrationTests(unittest.TestCase):
                     "case": case,
                     "start_utc": "2026-08-15T12:00:00Z",
                     "duration_seconds": 90,
+                    "proton_exit_code": 0,
                     "capture_complete": True,
                     "capture_warnings": [],
                 }
@@ -77,6 +78,9 @@ class AnalyzerIntegrationTests(unittest.TestCase):
             self.assertTrue((bundle / "0123456789abcdef.spv").is_file())
             self.assertIn("CANDIDATE CRASH REGION", (bundle / "README.md").read_text())
             self.assertNotIn("ROOT CAUSE", (bundle / "README.md").read_text())
+            candidate_again = analysis.generate_candidate([first, second])
+            self.assertEqual(candidate_again["fingerprint"], candidate["fingerprint"])
+            self.assertFalse(any(root.glob("culprit-candidate.previous-*")))
 
     def test_one_failure_does_not_generate_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -85,6 +89,61 @@ class AnalyzerIntegrationTests(unittest.TestCase):
             with mock.patch.object(analysis, "RESULTS_ROOT", root):
                 self.assertIsNone(analysis.generate_candidate([only]))
             self.assertFalse((root / "culprit-candidate").exists())
+
+    def test_matching_nonfirst_region_can_generate_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            first_path = self.make_run(root, "2026-08-15T120000Z", "baseline")
+            second_path = self.make_run(root, "2026-08-15T120500Z", "single-queue")
+            original = (FIXTURES / "vkd3d-breadcrumb.log").read_text()
+            different = (
+                original.replace("direct queue 0", "compute queue 0")
+                .replace("0123456789abcdef", "fedcba9876543210")
+                .replace("Command: dispatch", "Command: draw")
+                .replace("Done analyzing breadcrumbs ...", "")
+            )
+            (second_path / "vkd3d.log").write_text(different + original)
+            first = analysis.summarize_run(first_path)
+            second = analysis.summarize_run(second_path)
+            self.assertNotEqual(
+                first["primary_region_fingerprint"], second["primary_region_fingerprint"]
+            )
+            with mock.patch.object(analysis, "RESULTS_ROOT", root):
+                candidate = analysis.generate_candidate([first, second])
+            self.assertIsNotNone(candidate)
+            self.assertEqual(candidate["source_regions"][1]["region_index"], 1)
+
+    def test_short_no_xid_run_is_not_used_as_stability_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            baseline = analysis.summarize_run(
+                self.make_run(root, "2026-08-15T120000Z", "baseline")
+            )
+            comparison_path = self.make_run(
+                root, "2026-08-15T120500Z", "single-queue"
+            )
+            (comparison_path / "kernel-full.log").write_text("")
+            (comparison_path / "xid-events.json").write_text(json.dumps({"events": []}))
+            (comparison_path / "vkd3d.log").write_text("")
+            (comparison_path / "proton.log").write_text("")
+            comparison = analysis.summarize_run(comparison_path)
+            self.assertFalse(comparison["valid_no_xid_observation"])
+            evidence = analysis.build_evidence([baseline, comparison])
+            self.assertFalse(any("Queue topology" in item for item in evidence["inferred"]))
+
+    def test_clean_ten_minute_no_xid_run_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_path = self.make_run(root, "2026-08-15T120500Z", "single-queue")
+            metadata = json.loads((run_path / "metadata.json").read_text())
+            metadata["duration_seconds"] = 600
+            (run_path / "metadata.json").write_text(json.dumps(metadata))
+            (run_path / "kernel-full.log").write_text("")
+            (run_path / "xid-events.json").write_text(json.dumps({"events": []}))
+            (run_path / "vkd3d.log").write_text("")
+            (run_path / "proton.log").write_text("")
+            run = analysis.summarize_run(run_path)
+            self.assertTrue(run["valid_no_xid_observation"])
 
     def test_report_uses_evidence_levels(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

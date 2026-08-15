@@ -44,6 +44,29 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("fault", matrix.lower())
         self.assertNotIn("vk_debug", matrix.lower())
 
+    def test_no_xid_policy_requires_ten_minutes(self) -> None:
+        policy = json.loads((ROOT / "config/test-policy.json").read_text())
+        self.assertEqual(policy["no_xid_observation_seconds"], 600)
+        self.assertEqual(
+            policy["recommended_case_order"],
+            ["baseline", "single-queue", "no-descriptor-buffer", "sync"],
+        )
+
+    def test_tester_notice_and_third_party_boundaries_exist(self) -> None:
+        terms = (ROOT / "TESTER-TERMS.md").read_text()
+        notices = (ROOT / "THIRD-PARTY-NOTICES.md").read_text()
+        self.assertIn("Notice version: `2026-08-15.2`", terms)
+        self.assertIn("Nothing is uploaded automatically", terms)
+        self.assertIn("GNU Lesser General Public License", notices)
+        self.assertIn("corresponding-source", notices)
+        self.assertTrue((ROOT / "LICENSES/VKD3D-Proton-LGPL-2.1.txt").is_file())
+        self.assertTrue((ROOT / "LICENSES/VKD3D-Proton-COPYING.txt").is_file())
+
+    def test_default_result_pack_excludes_nvidia_report(self) -> None:
+        packer = (ROOT / "tools/pack-results.sh").read_text()
+        self.assertIn("--exclude='results/nvidia-reports'", packer)
+        self.assertIn("PRIVATE-il2-xid109-results", packer)
+
 
 if __name__ == "__main__":
     unittest.main()

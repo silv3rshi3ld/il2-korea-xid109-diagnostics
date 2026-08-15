@@ -11,6 +11,8 @@
 /.state/
 /*.tar.gz
 /*.tar.zst
+/*.tar.gz.sha256
+/*.tar.zst.sha256
 /nvidia-bug-report*.log.gz
 
 # Python and test caches.

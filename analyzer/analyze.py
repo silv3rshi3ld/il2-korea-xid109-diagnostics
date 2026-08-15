@@ -52,6 +52,26 @@ def atomic_json(path: pathlib.Path, value: Any) -> None:
     atomic_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def negative_observation_threshold() -> int:
+    policy = read_json(REPO_ROOT / "config/test-policy.json", {})
+    return int(policy.get("no_xid_observation_seconds", 600))
+
+
+def region_summary(region: dict[str, Any]) -> dict[str, Any]:
+    checkpoint = region.get("checkpoint") or {}
+    return {
+        "queue": region.get("queue"),
+        "bottom_context": checkpoint.get("bottom_context"),
+        "top_context": checkpoint.get("top_context"),
+        "last_completed": checkpoint.get("bottom_marker"),
+        "top_progress": checkpoint.get("top_marker"),
+        "commands": region.get("commands", []),
+        "shaders": [item["hash"] for item in region.get("shaders", [])],
+        "events": region.get("events", []),
+        "fingerprint": region.get("fingerprint"),
+    }
+
+
 def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
     metadata = read_json(run_dir / "metadata.json", {})
     kernel_text = read_text(run_dir / "kernel-full.log")
@@ -59,27 +79,49 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
     events = xid_data.get("events") if isinstance(xid_data, dict) else None
     if not isinstance(events, list):
         events = parse_kernel_log(kernel_text)
-    xid109 = [event for event in events if event.get("xid") == 109]
+    all_xid109 = [event for event in events if event.get("xid") == 109]
+    xid109 = [
+        event
+        for event in all_xid109
+        if str(event.get("name") or "").casefold() == "il2series.exe"
+    ]
+    unattributed_xid109 = [event for event in all_xid109 if event not in xid109]
     vkd3d_text = read_text(run_dir / "vkd3d.log")
     proton_text = read_text(run_dir / "proton.log")
     vkd3d = parse_vkd3d_log(vkd3d_text)
     proton = parse_proton_log(proton_text)
     regions = vkd3d["regions"]
     primary = regions[0] if regions else None
-    checkpoint = primary.get("checkpoint") if primary else None
-    queue = primary.get("queue") if primary else None
     device_lost = bool(vkd3d["device_lost"] or proton["device_lost"])
     first_lost = vkd3d["first_device_lost"] or proton["first"]
+    duration = metadata.get("duration_seconds")
+    capture_warnings = metadata.get("capture_warnings", []) or []
+    capture_interrupted = bool(
+        metadata.get("capture_interrupted") or metadata.get("recovered_after_interruption")
+    )
+    valid_negative = bool(
+        metadata.get("capture_complete")
+        and not xid109
+        and isinstance(duration, int)
+        and duration >= negative_observation_threshold()
+        and metadata.get("proton_exit_code") == 0
+        and not capture_warnings
+        and not capture_interrupted
+    )
 
     outcome_parts = []
     if xid109:
-        outcome_parts.append("Xid 109")
+        outcome_parts.append("IL2Series.exe Xid 109")
+    elif valid_negative:
+        outcome_parts.append("No Xid 109 in valid observation window")
     elif metadata.get("capture_complete"):
-        outcome_parts.append("No Xid 109 observed")
+        outcome_parts.append("No Xid 109; inconclusive capture")
     else:
         outcome_parts.append("Incomplete capture")
     if device_lost:
         outcome_parts.append("device lost")
+    if unattributed_xid109:
+        outcome_parts.append("unattributed Xid 109 also present")
     if regions:
         outcome_parts.append(f"{len(regions)} crash region(s)")
 
@@ -91,11 +133,15 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
         "path": str(run_dir),
         "case": metadata.get("case", "unknown"),
         "start_utc": metadata.get("start_utc"),
-        "duration_seconds": metadata.get("duration_seconds"),
+        "duration_seconds": duration,
         "capture_complete": bool(metadata.get("capture_complete")),
-        "capture_warnings": metadata.get("capture_warnings", []),
+        "capture_warnings": capture_warnings,
+        "capture_interrupted": capture_interrupted,
+        "proton_exit_code": metadata.get("proton_exit_code"),
+        "valid_no_xid_observation": valid_negative,
         "xid109": bool(xid109),
         "xid109_events": xid109,
+        "unattributed_xid109_events": unattributed_xid109,
         "pci": sorted({event.get("pci") for event in xid109 if event.get("pci")}),
         "channels": sorted({event.get("channel") for event in xid109 if event.get("channel")}),
         "info": sorted({event.get("info") for event in xid109 if event.get("info")}),
@@ -103,24 +149,18 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
         "first_device_lost": first_lost,
         "breadcrumb_analysis": vkd3d["breadcrumb_analysis"],
         "regions": clean_regions,
+        "region_fingerprints": [
+            region["fingerprint"] for region in clean_regions if region.get("fingerprint")
+        ],
         "primary_region_fingerprint": primary.get("fingerprint") if primary else None,
-        "crash_region": {
-            "queue": queue,
-            "bottom_context": checkpoint.get("bottom_context") if checkpoint else None,
-            "top_context": checkpoint.get("top_context") if checkpoint else None,
-            "last_completed": checkpoint.get("bottom_marker") if checkpoint else None,
-            "top_progress": checkpoint.get("top_marker") if checkpoint else None,
-            "commands": primary.get("commands", []) if primary else [],
-            "shaders": [item["hash"] for item in primary.get("shaders", [])] if primary else [],
-        },
+        "crash_regions": [region_summary(region) for region in clean_regions],
+        "crash_region": region_summary(primary) if primary else region_summary({}),
         "outcome": ", ".join(outcome_parts),
     }
 
 
 def same_region(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    left_fp = left.get("primary_region_fingerprint")
-    right_fp = right.get("primary_region_fingerprint")
-    return bool(left_fp and right_fp and left_fp == right_fp)
+    return bool(set(left.get("region_fingerprints", [])) & set(right.get("region_fingerprints", [])))
 
 
 def build_evidence(runs: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -131,11 +171,14 @@ def build_evidence(runs: list[dict[str, Any]]) -> dict[str, list[str]]:
     for run in runs:
         by_case[run["case"]].append(run)
         duration = run.get("duration_seconds")
+        validity = "valid no-Xid observation" if run["valid_no_xid_observation"] else \
+            ("direct failure observation" if run["xid109"] else "inconclusive no-Xid observation")
         observed.append(
-            f"{run['run']}: {'produced' if run['xid109'] else 'did not produce'} Xid 109 "
+            f"{run['run']}: {'produced' if run['xid109'] else 'did not produce'} an "
+            "IL2Series.exe-attributed Xid 109 "
             f"during the captured {duration if duration is not None else 'unknown'}-second run; "
             f"device lost was {'observed' if run['device_lost'] else 'not observed'}; "
-            f"{len(run['regions'])} breadcrumb crash region(s) were parsed."
+            f"{len(run['regions'])} breadcrumb crash region(s) were parsed; {validity}."
         )
 
     baseline_failures = [run for run in by_case.get("baseline", []) if run["xid109"]]
@@ -158,28 +201,32 @@ def build_evidence(runs: list[dict[str, Any]]) -> dict[str, list[str]]:
                 "The failure survives synchronized breadcrumb instrumentation; that does not identify the faulty synchronization primitive.",
             ),
         ):
-            completed = [run for run in by_case.get(case_name, []) if run["capture_complete"]]
-            if not completed:
+            conclusive = [
+                run for run in by_case.get(case_name, [])
+                if run["xid109"] or run["valid_no_xid_observation"]
+            ]
+            if not conclusive:
                 continue
-            comparison = completed[-1]
+            comparison = conclusive[-1]
             if not comparison["xid109"]:
                 inferred.append(f"{case_name}: {stable_text}")
             else:
-                qualifier = " The parsed primary crash-region fingerprint matches baseline." \
+                qualifier = " At least one parsed crash-region fingerprint matches baseline." \
                     if same_region(baseline, comparison) else ""
                 inferred.append(f"{case_name}: {fail_text}{qualifier}")
 
-    failing_with_regions = [
-        run for run in runs
-        if run["xid109"] and run["device_lost"] and run.get("primary_region_fingerprint")
-    ]
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for run in failing_with_regions:
-        groups[run["primary_region_fingerprint"]].append(run)
-    for fingerprint, group in groups.items():
+    groups: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for run in runs:
+        if not (run["xid109"] and run["device_lost"]):
+            continue
+        for region in run["crash_regions"]:
+            if region.get("fingerprint") and (region.get("commands") or region.get("shaders")):
+                groups[region["fingerprint"]][run["run"]] = run
+    for fingerprint, run_map in groups.items():
+        group = list(run_map.values())
         if len(group) >= 2:
             observed.append(
-                f"{len(group)} failing runs share normalized primary crash-region fingerprint "
+                f"{len(group)} failing runs share normalized crash-region fingerprint "
                 f"{fingerprint[:12]}: {', '.join(run['run'] for run in group)}."
             )
             inferred.append(
@@ -199,13 +246,23 @@ def cell(value: Any) -> str:
 
 
 def table_row(run: dict[str, Any]) -> str:
-    region = run["crash_region"]
-    queue = region.get("queue")
-    queue_text = f"{queue['type']}[{queue['index']}]" if queue else "—"
-    contexts = "—"
-    if region.get("bottom_context") is not None:
-        contexts = f"{queue_text} ctx {region['bottom_context']}→{region['top_context']}"
-    shaders = region.get("shaders", [])
+    regions = run["crash_regions"]
+    contexts: list[str] = []
+    shaders: list[str] = []
+    completed: list[str] = []
+    next_commands: list[str] = []
+    for region in regions:
+        queue = region.get("queue")
+        queue_text = f"{queue['type']}[{queue['index']}]" if queue else "unknown queue"
+        if region.get("bottom_context") is not None:
+            contexts.append(f"{queue_text} ctx {region['bottom_context']}→{region['top_context']}")
+        for shader in region.get("shaders", []):
+            if shader not in shaders:
+                shaders.append(shader)
+        if region.get("last_completed") is not None:
+            completed.append(f"{queue_text}:{region['last_completed']}")
+        if region.get("commands"):
+            next_commands.append(f"{queue_text}:{region['commands'][0]}")
     return "| " + " | ".join(
         [
             cell(run["case"]),
@@ -216,8 +273,8 @@ def table_row(run: dict[str, Any]) -> str:
             "yes" if run["device_lost"] else "no",
             cell(contexts),
             cell(shaders[:4]),
-            cell(region.get("last_completed")),
-            cell(region.get("commands", [None])[0] if region.get("commands") else None),
+            cell(completed),
+            cell(next_commands),
             cell(run["outcome"]),
         ]
     ) + " |"
@@ -264,17 +321,43 @@ def copy_candidate_shaders(candidate: pathlib.Path, runs: list[dict[str, Any]], 
 
 
 def generate_candidate(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[str, dict[str, tuple[dict[str, Any], int]]] = defaultdict(dict)
     for run in runs:
-        region = run["crash_region"]
-        if run["xid109"] and run["device_lost"] and run.get("primary_region_fingerprint") and \
-                (region.get("commands") or region.get("shaders")):
-            groups[run["primary_region_fingerprint"]].append(run)
-    converged = [(fingerprint, group) for fingerprint, group in groups.items() if len(group) >= 2]
+        if not (run["xid109"] and run["device_lost"]):
+            continue
+        for index, region in enumerate(run["crash_regions"]):
+            fingerprint = region.get("fingerprint")
+            if fingerprint and (region.get("commands") or region.get("shaders")):
+                groups[fingerprint].setdefault(run["run"], (run, index))
+    converged = [
+        (fingerprint, list(run_map.values()))
+        for fingerprint, run_map in groups.items()
+        if len(run_map) >= 2
+    ]
     if not converged:
         return None
-    fingerprint, group = max(converged, key=lambda item: len(item[1]))
+    fingerprint, matches = max(converged, key=lambda item: len(item[1]))
+    group = [run for run, _ in matches]
     final_candidate = RESULTS_ROOT / "culprit-candidate"
+    source_regions = [
+        {
+            "run": run["run"],
+            "region_index": region_index,
+            "queue": run["crash_regions"][region_index].get("queue"),
+            "bottom_context": run["crash_regions"][region_index].get("bottom_context"),
+            "top_context": run["crash_regions"][region_index].get("top_context"),
+        }
+        for run, region_index in matches
+    ]
+    if final_candidate.is_dir() and (
+        final_candidate / ".generated-by-il2-xid109-analyzer"
+    ).is_file():
+        existing = read_json(final_candidate / "metadata.json", {})
+        if (
+            existing.get("fingerprint") == fingerprint
+            and existing.get("source_regions") == source_regions
+        ):
+            return existing
     candidate = RESULTS_ROOT / f".culprit-candidate-building-{os.getpid()}"
     if candidate.exists():
         raise RuntimeError(f"candidate staging directory already exists: {candidate}")
@@ -282,7 +365,11 @@ def generate_candidate(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     marker = candidate / ".generated-by-il2-xid109-analyzer"
     marker.write_text("generated; safe for analyzer-owned files only\n", encoding="utf-8")
 
-    hashes = {shader for run in group for shader in run["crash_region"]["shaders"]}
+    hashes = {
+        shader
+        for run, region_index in matches
+        for shader in run["crash_regions"][region_index]["shaders"]
+    }
     shader_entries = copy_candidate_shaders(candidate, group, hashes)
     region_sections: list[str] = []
     vkd3d_sections: list[str] = []
@@ -290,11 +377,12 @@ def generate_candidate(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     xid_sections: list[str] = []
     device_pattern = re.compile(r"VK_ERROR_DEVICE_LOST|Device lost observed|DEVICE_LOST", re.IGNORECASE)
     xid_pattern = re.compile(r"NVRM|Xid|CTX SWITCH TIMEOUT|IL2Series\.exe", re.IGNORECASE)
-    for run in group:
+    for run, region_index in matches:
         run_dir = pathlib.Path(run["path"])
         vkd3d_text = read_text(run_dir / "vkd3d.log")
         parsed = parse_vkd3d_log(vkd3d_text)
-        raw_region = parsed["regions"][0].get("raw_lines", []) if parsed["regions"] else []
+        raw_region = parsed["regions"][region_index].get("raw_lines", []) \
+            if region_index < len(parsed["regions"]) else []
         region_sections.append(f"===== {run['run']} =====\n" + "\n".join(raw_region) + "\n")
         vkd3d_sections.append(
             f"===== {run['run']} =====\n" + context_around_first(vkd3d_text, device_pattern, 80)
@@ -322,6 +410,7 @@ def generate_candidate(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
         "generated_utc": utc_now(),
         "fingerprint": fingerprint,
         "source_runs": [run["run"] for run in group],
+        "source_regions": source_regions,
         "xid": 109,
         "shader_hashes": sorted(hashes),
         "claim": "Repeated observed region; root cause not proven",
@@ -330,8 +419,8 @@ def generate_candidate(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     atomic_text(
         candidate / "README.md",
         "# CANDIDATE CRASH REGION\n\n"
-        "This bundle was generated because multiple Xid 109/device-lost runs had the same "
-        "normalized command/shader-region fingerprint.\n\n"
+        "This bundle was generated because multiple Xid 109/device-lost runs had at least one "
+        "matching normalized queue/command/shader/event region fingerprint.\n\n"
         f"OBSERVED: the matching runs are {', '.join(run['run'] for run in group)}.\n\n"
         "INFERRED: this repeated region is a useful target for focused source, shader, and resource analysis.\n\n"
         "PROVEN: no command, shader, resource, VKD3D component, game behavior, or NVIDIA driver defect "

@@ -24,7 +24,8 @@ VK_ERROR_DEVICE_LOST + kernel Xid 109 correlation
 - `VKD3D_SHADER_DEBUG=err`
 - `VKD3D_LOG_FILE=<run>/vkd3d.log`
 - `VKD3D_SHADER_DUMP_PATH=<run>/shaders`
-- UTC run boundaries and journal cursor
+- UTC run boundaries, original boot ID, and journal cursor
+- line-buffered live kernel-journal spool with hostname-field suppression
 - unfiltered kernel journal within the run boundary
 - filtered NVIDIA/Xid context
 - system, driver, Vulkan, exact build, and selected-environment metadata
@@ -43,25 +44,27 @@ The order places the high-value queue discriminator before the heavier synchroni
 
 ## Per-run lifecycle
 
-The copied Proton entry point checks AppID 247970. Other AppIDs are handed directly to the original Proton entry point with no diagnostic environment.
+The copied Proton entry point checks AppID 247970. Other AppIDs are handed directly to the copied `proton.real` with no diagnostic collection environment. Because the copied tree still contains the diagnostic VKD3D DLL, the compatibility tool must never be selected for another game.
 
-For Korea, it locks against concurrent runs, allocates a unique UTC directory, snapshots provenance and system state, records a journal cursor, sets the chosen matrix environment, and invokes the unmodified copied `proton.real`. When Proton returns, it captures the journal after the cursor and produces parsed artifacts. An interrupted run retains `.capture-in-progress`; no later run overwrites it.
+For Korea, it locks against concurrent runs, allocates a unique UTC directory, snapshots actual installation/build provenance and system state, records a journal cursor and boot ID, and sets the chosen matrix environment. Before Proton starts, a line-buffered live kernel-journal follower must remain alive through a health check. The follower and managed Proton child do not inherit the run-lock descriptor; both arm Linux's parent-death signal so a forcibly killed launcher does not leave orphan collectors or Proton wrappers.
 
-`kernel-full.log` is the unfiltered kernel journal inside the run bracket. `kernel-window.log` keeps NVRM, Xid, timeout, and IL2 process lines plus nearby context. Despite the name, the former is not the whole boot journal and does not collect unrelated userspace services.
+The launcher runs the unmodified copied `proton.real` as a managed child so TERM, INT, and HUP can be forwarded while Bash is waiting. When Proton returns, normal finalization stops the follower, snapshots the original boot after the cursor, merges the snapshot with the live spool, and produces parsed artifacts. A forced power cycle leaves `.capture-in-progress`; `recover` explicitly queries the saved original boot and incorporates the already-written live spool. Recovered or warned captures require coordinator review and cannot automatically advance the matrix.
+
+`kernel-full.log` is the unfiltered kernel journal from the original boot after the run cursor through finalization/recovery. `kernel-window.log` keeps NVRM, Xid, timeout, and IL2 process lines plus nearby context. Despite the name, the former is not the whole boot journal and does not collect unrelated userspace services. It can contain unrelated kernel events inside that bracket.
 
 ## Provenance
 
 `build-manifest.json` records source/submodule commits, expected patch and diff hashes, dirty state, Meson arguments, reproducibility environment, compiler/linker/dependency versions, timestamps, sizes, and SHA256 values for every built DLL.
 
-`install-manifest.json` records the exact installed Proton/VKD3D version strings and both the original and replacement x64 `d3d12core.dll` hashes.
+`install-manifest.json` records the exact installed Proton/VKD3D version strings and both the original and replacement x64 `d3d12core.dll` hashes. A copy is placed in every run so provenance survives uninstall and removal of the disabled compatibility-tool copy.
 
 ## Candidate generation threshold
 
-The analyzer normalizes the ordered commands and shader hashes in the first parsed crash region and hashes that representation. It creates the candidate bundle only when at least two runs meet all of these conditions:
+The analyzer evaluates every parsed crash region. It fingerprints queue identity and ordered command/shader/argument/tag events while normalizing run-local resource-cookie values. It creates the candidate bundle only when at least two distinct runs meet all of these conditions:
 
-- Xid 109 observed
+- Xid 109 attributed to `IL2Series.exe`
 - device loss observed
 - a nonempty command or shader region parsed
 - identical normalized region fingerprints
 
-This deliberately favors precision over aggressive matching. Similar but non-identical regions remain visible in the comparison report without generating a candidate bundle.
+This deliberately favors precision over aggressive matching. Similar but non-identical regions remain visible in the comparison report without generating a candidate bundle. Re-running analysis with an unchanged matching run set is idempotent and does not duplicate candidate evidence.

@@ -10,10 +10,15 @@ fi
 real_proton=$1
 shift
 
-app_id=${SteamAppId:-${STEAM_COMPAT_APP_ID:-}}
+app_id=${SteamAppId:-${STEAM_COMPAT_APP_ID:-${SteamGameId:-}}}
 if [[ $app_id != 247970 ]]; then
     exec "$real_proton" "$@"
 fi
+proton_action=${1:-}
+case $proton_action in
+    run|waitforexitandrun) ;;
+    *) exec "$real_proton" "$@" ;;
+esac
 
 state_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo_path_file="$state_dir/repo-path"
@@ -41,6 +46,20 @@ case_record=$(il2_diag_matrix_lookup "$matrix" "$selected_case") || {
 }
 IFS='|' read -r case_name vkd3d_config disabled_extensions case_description <<<"$case_record"
 
+kernel_probe=$(journalctl -k -n 1 -o cat --no-pager 2>/dev/null || true)
+if [[ -z $kernel_probe ]]; then
+    printf '%s\n' \
+        'error: kernel journal access is unavailable, so an NVIDIA Xid could not be captured.' \
+        'Run ./il2-diagnostic.sh check and send its output to the investigation coordinator.' >&2
+    exit 1
+fi
+
+available_kib=$(df -Pk -- "$repo_dir" | awk 'NR == 2 {print $4}')
+if [[ ! $available_kib =~ ^[0-9]+$ ]] || ((available_kib < IL2_DIAG_PER_RUN_HEADROOM_KIB)); then
+    printf 'error: at least 2 GiB of free result space is required before each run\n' >&2
+    exit 1
+fi
+
 exec 9>"$state_dir/run.lock"
 if ! flock -n 9; then
     printf 'error: another IL-2 diagnostic run is already active\n' >&2
@@ -65,9 +84,13 @@ printf 'capture started; this file becomes .capture-complete during normal final
 
 start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 start_epoch=$(date +%s)
-harness_commit='uncommitted'
-if [[ -d $repo_dir/.git ]]; then
-    harness_commit=$(git -C "$repo_dir" rev-parse HEAD 2>/dev/null || printf uncommitted)
+harness_commit=$(il2_diag_harness_revision "$repo_dir")
+printf '%s\n' "$start_utc" >"$run_dir/start-utc.txt"
+printf '%s\n' "$start_epoch" >"$run_dir/start-epoch.txt"
+if [[ -r /proc/sys/kernel/random/boot_id ]]; then
+    cp -- /proc/sys/kernel/random/boot_id "$run_dir/boot-id-start.txt"
+else
+    printf '%s\n' unavailable >"$run_dir/boot-id-start.txt"
 fi
 
 journal_cursor=''
@@ -89,6 +112,7 @@ python3 "$repo_dir/tools/run-artifacts.py" init \
     --start "$start_utc" \
     --build-manifest "$state_dir/build-manifest.json" \
     --harness-commit "$harness_commit"
+cp -a -- "$state_dir/install-manifest.json" "$run_dir/install-manifest.json"
 
 {
     printf 'real_proton='
@@ -116,6 +140,7 @@ unset VKD3D_VULKAN_DEVICE VKD3D_FILTER_DEVICE_NAME
 {
     printf 'SteamAppId=%s\n' "${SteamAppId:-unset}"
     printf 'STEAM_COMPAT_APP_ID=%s\n' "${STEAM_COMPAT_APP_ID:-unset}"
+    printf 'SteamGameId=%s\n' "${SteamGameId:-unset}"
     printf 'STEAM_COMPAT_DATA_PATH=%s\n' "${STEAM_COMPAT_DATA_PATH:-unset}"
     printf 'PROTON_LOG=%s\n' "$PROTON_LOG"
     printf 'PROTON_LOG_DIR=%s\n' "$PROTON_LOG_DIR"
@@ -129,87 +154,97 @@ unset VKD3D_VULKAN_DEVICE VKD3D_FILTER_DEVICE_NAME
     printf 'VKD3D_FILTER_DEVICE_NAME=unset-by-harness\n'
 } >"$run_dir/environment.txt"
 
-warnings=()
+warnings_file="$run_dir/capture-warnings.txt"
+: >"$warnings_file"
 if ! "$repo_dir/tools/collect-system.sh" "$run_dir"; then
-    warnings+=("system collection failed")
+    printf '%s\n' 'system collection failed' >>"$warnings_file"
+fi
+
+journal_pid=''
+capture_ready=1
+proton_status=125
+proton_pid=''
+requested_signal_status=''
+stop_journal_follower() {
+    if [[ -n $journal_pid ]] && kill -0 "$journal_pid" 2>/dev/null; then
+        kill "$journal_pid" 2>/dev/null || true
+        wait "$journal_pid" 2>/dev/null || true
+    fi
+    journal_pid=''
+}
+forward_signal() {
+    local signal_name=$1
+    local signal_status=$2
+    requested_signal_status=$signal_status
+    if [[ -n $proton_pid ]] && kill -0 "$proton_pid" 2>/dev/null; then
+        kill -s "$signal_name" "$proton_pid" 2>/dev/null || true
+    else
+        exit "$signal_status"
+    fi
+}
+finalize_on_exit() {
+    local saved_status=$?
+    trap - EXIT HUP INT TERM
+    stop_journal_follower
+    if ((capture_ready)) && [[ -f $run_dir/.capture-in-progress ]]; then
+        "$repo_dir/tools/finalize-run.sh" --run-dir "$run_dir" \
+            --exit-code "$proton_status" --interrupted || true
+    fi
+    exit "$saved_status"
+}
+trap finalize_on_exit EXIT
+trap 'forward_signal HUP 129' HUP
+trap 'forward_signal INT 130' INT
+trap 'forward_signal TERM 143' TERM
+
+boot_id=$(tr -d '-' <"$run_dir/boot-id-start.txt")
+if [[ -n $journal_cursor ]]; then
+    python3 "$repo_dir/tools/parent-death-exec.py" stdbuf -oL -eL \
+        journalctl -k --boot="$boot_id" --after-cursor="$journal_cursor" \
+        -o short-iso-precise --no-hostname --no-pager --follow \
+        >"$run_dir/kernel-live.log" 2>"$run_dir/journal-follow-errors.log" 9>&- &
+else
+    python3 "$repo_dir/tools/parent-death-exec.py" stdbuf -oL -eL \
+        journalctl -k --boot="$boot_id" --since "$start_utc" \
+        -o short-iso-precise --no-hostname --no-pager --follow \
+        >"$run_dir/kernel-live.log" 2>"$run_dir/journal-follow-errors.log" 9>&- &
+fi
+journal_pid=$!
+printf '%s\n' "$journal_pid" >"$run_dir/journal-follower.pid"
+sleep 0.2
+if ! kill -0 "$journal_pid" 2>/dev/null; then
+    wait "$journal_pid" 2>/dev/null || true
+    printf '%s\n' 'live kernel journal collector exited before the game started' >>"$warnings_file"
+    printf '%s\n' \
+        'error: live kernel journal capture could not stay active; the game was not started.' \
+        'Run ./il2-diagnostic.sh check and send the output to the coordinator.' >&2
+    exit 1
 fi
 
 printf 'IL-2 Xid109 diagnostics: starting %s run in %s\n' "$case_name" "$run_dir" >&2
 set +e
-"$real_proton" "$@"
-proton_status=$?
-set -e
-
-end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-end_epoch=$(date +%s)
-duration=$((end_epoch - start_epoch))
-
-steam_log="$run_dir/steam-$app_id.log"
-if [[ -f $steam_log ]]; then
-    mv -- "$steam_log" "$run_dir/proton.log"
-fi
-home_proton_log="$HOME/steam-$app_id.log"
-if [[ -f $home_proton_log ]]; then
-    home_log_mtime=$(stat -c %Y -- "$home_proton_log" 2>/dev/null || printf 0)
-    if ((home_log_mtime >= start_epoch)); then
-        cp -a -- "$home_proton_log" "$run_dir/proton-home.log"
-        if [[ ! -f $run_dir/proton.log ]]; then
-            cp -a -- "$home_proton_log" "$run_dir/proton.log"
-        fi
+python3 "$repo_dir/tools/parent-death-exec.py" "$real_proton" "$@" 9>&- &
+proton_pid=$!
+printf '%s\n' "$proton_pid" >"$run_dir/proton-child.pid"
+while true; do
+    wait "$proton_pid"
+    wait_status=$?
+    if kill -0 "$proton_pid" 2>/dev/null; then
+        continue
     fi
-fi
-if [[ ! -f $run_dir/proton.log ]]; then
-    warnings+=("Proton log was not created")
-    : >"$run_dir/proton.log"
-fi
-if [[ ! -f $run_dir/vkd3d.log ]]; then
-    warnings+=("VKD3D log was not created")
-    : >"$run_dir/vkd3d.log"
-fi
-
-kernel_log="$run_dir/kernel-full.log"
-if [[ -n $journal_cursor ]]; then
-    if ! journalctl -k --after-cursor="$journal_cursor" -o short-iso-precise --no-pager \
-        >"$kernel_log" 2>&1; then
-        warnings+=("kernel journal capture after cursor failed")
-    fi
-elif command -v journalctl >/dev/null 2>&1; then
-    if ! journalctl -k --since "$start_utc" --until "$end_utc" \
-        -o short-iso-precise --no-pager >"$kernel_log" 2>&1; then
-        warnings+=("kernel journal time-window capture failed")
-    fi
-else
-    printf 'journalctl unavailable\n' >"$kernel_log"
-    warnings+=("journalctl unavailable")
-fi
-
-if ! python3 "$repo_dir/tools/filter-kernel-context.py" \
-    --input "$kernel_log" --output "$run_dir/kernel-window.log"; then
-    warnings+=("kernel context filtering failed")
-fi
-if ! python3 "$repo_dir/tools/run-artifacts.py" xids \
-    --input "$kernel_log" --output "$run_dir/xid-events.json"; then
-    warnings+=("Xid parsing failed")
-fi
-if ! python3 "$repo_dir/tools/run-artifacts.py" breadcrumbs \
-    --input "$run_dir/vkd3d.log" --output "$run_dir/breadcrumb-report.txt"; then
-    warnings+=("breadcrumb extraction failed")
-fi
-if ! python3 "$repo_dir/tools/run-artifacts.py" shaders \
-    --directory "$run_dir/shaders" --run-dir "$run_dir" \
-    --results-root "$results_root" --output "$run_dir/shader-manifest.json"; then
-    warnings+=("shader manifest generation failed")
-fi
-
-finish_args=(finish --metadata "$run_dir/metadata.json" --end "$end_utc" \
-    --duration "$duration" --exit-code "$proton_status")
-for warning in "${warnings[@]}"; do
-    finish_args+=(--warning "$warning")
+    proton_status=$wait_status
+    break
 done
-python3 "$repo_dir/tools/run-artifacts.py" "${finish_args[@]}"
-python3 "$repo_dir/tools/run-artifacts.py" summary \
-    --run-dir "$run_dir" --output "$run_dir/run-summary.txt" || true
-mv -- "$run_dir/.capture-in-progress" "$run_dir/.capture-complete"
+if [[ -n $requested_signal_status ]]; then
+    proton_status=$requested_signal_status
+fi
+set -e
+stop_journal_follower
+finalize_args=(--run-dir "$run_dir" --exit-code "$proton_status")
+[[ -n $requested_signal_status ]] && finalize_args+=(--interrupted)
+"$repo_dir/tools/finalize-run.sh" "${finalize_args[@]}"
+capture_ready=0
+trap - EXIT HUP INT TERM
 
 printf 'IL-2 Xid109 diagnostics: finalized %s\n' "$run_dir" >&2
 exit "$proton_status"

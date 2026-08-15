@@ -10,7 +10,7 @@ Directly present in captured artifacts. Examples:
 - Both reports contain shader hash `0123456789abcdef` inside the parsed potential region.
 - The single-queue run completed ten minutes without a captured Xid 109.
 
-State the duration and capture completeness for negative observations. “Not observed” is not “cannot occur.”
+State the duration and capture completeness for negative observations. The automatic ten-minute threshold measures total Proton runtime; protocol validity also depends on the tester actually keeping the fully rendered known-failing hangar idle for ten full minutes. “Not observed” is not “cannot occur.”
 
 ## INFERRED
 
@@ -42,3 +42,5 @@ A claim demonstrated strongly enough to exclude alternatives. This four-run phas
 Top-of-pipe progress shows that the command processor reached a marker. Bottom-of-pipe progress shows retirement through a marker. Commands between those points are possible contributors, but checkpoint placement, pipelining, and the eventual device-lost observation limit precision. `breadcrumbs_sync` narrows some ambiguity by adding strong barriers but also changes execution.
 
 Xid channel and `Info` values should be compared across runs as signatures. They do not, by themselves, map to a D3D12 command or prove the application submitted invalid work.
+
+Automatic matrix progression requires an Xid 109 line attributed to `IL2Series.exe`, device-lost breadcrumb analysis, at least one parsed crash region, and no interruption/capture warning. An unattributed, recovered, warned, or region-less Xid remains recorded evidence but is labeled `REVIEW REQUIRED`; it is not silently treated as a complete forensic case.
