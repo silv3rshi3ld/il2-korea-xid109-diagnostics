@@ -1,0 +1,3 @@
+3245.123:0120:warn:vulkan:queue submit returned VK_SUCCESS
+3245.456:0120:err:vulkan:queue submit returned VK_ERROR_DEVICE_LOST
+3245.789:0120:err:dxgi:present failed

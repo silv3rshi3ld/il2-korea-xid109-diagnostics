@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "failing_proton": {
+    "build": "experimental-bleeding-edge-11.0-414018-20260814-p3b5456-w34e7d5-d3a4c6f-v238f15",
+    "commit": "0dda688b3840c381dfb76f87b81c9e50c846d627",
+    "repository": "https://github.com/ValveSoftware/Proton.git",
+    "commit_time_utc": "2026-08-14T12:36:01Z"
+  },
+  "vkd3d_proton": {
+    "commit": "238f157e1d64f90e0d90593557c092ab8af6e0a3",
+    "describe": "v3.0.1-276-g238f157e",
+    "repository": "https://github.com/HansKristian-Work/vkd3d-proton.git",
+    "submodules": {
+      "khronos/SPIRV-Headers": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "khronos/Vulkan-Headers": "0e9de566b7d4051c5cc1b762e242c46565956bdf",
+      "subprojects/dxil-spirv": "cc75a0c98d34d7bcc03560527c799b52e48b4d1f"
+    }
+  },
+  "build": {
+    "buildtype": "release",
+    "meson_arguments": [
+      "--buildtype=release",
+      "--strip",
+      "-Denable_trace=true"
+    ],
+    "source_date_epoch_from": "vkd3d-proton commit timestamp"
+  },
+  "patches": [
+    {
+      "path": "build/patches/0001-label-nvidia-checkpoint-queues.patch",
+      "sha256": "de27f33b859a3f232802c5513a7395f812f4a4777e5710ccbc9872fb070b9cd4",
+      "purpose": "Report-only labeling of direct, compute, and copy checkpoint queues"
+    }
+  ]
+}

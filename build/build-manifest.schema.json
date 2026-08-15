@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/il2-xid109/build-manifest.schema.json",
+  "title": "IL-2 Xid109 VKD3D diagnostic build manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "build_started_utc",
+    "build_finished_utc",
+    "source",
+    "build",
+    "toolchain",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "build_started_utc": {"type": "string"},
+    "build_finished_utc": {"type": "string"},
+    "source": {"type": "object"},
+    "build": {"type": "object"},
+    "toolchain": {"type": "object"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "size": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

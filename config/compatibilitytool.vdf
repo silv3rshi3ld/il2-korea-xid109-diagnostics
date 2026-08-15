@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "il2-xid109-diagnostic"
+    {
+      "install_path" "."
+      "display_name" "IL2 Xid109 Diagnostic"
+      "from_oslist" "windows"
+      "to_oslist" "linux"
+    }
+  }
+}

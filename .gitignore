@@ -1,0 +1,25 @@
+# Captured runs can contain usernames, paths, hardware identifiers, and game logs.
+/results/*
+!/results/.gitkeep
+
+# Local build products and source checkouts.
+/build/work/
+/build/output/
+/build-manifest.json
+
+# Local harness state, archives, and reports.
+/.state/
+/*.tar.gz
+/*.tar.zst
+/nvidia-bug-report*.log.gz
+
+# Python and test caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Editor and OS files.
+*.swp
+*~
+.DS_Store

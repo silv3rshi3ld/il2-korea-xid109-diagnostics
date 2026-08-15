@@ -1,0 +1,14 @@
+00e4:err:vkd3d_device: Device 0000000000000001 is lost (reason 0x887a0005, "VK_ERROR_DEVICE_LOST").
+00e4:err:vkd3d_breadcrumb_tracer_report_device_lost: Device lost observed, analyzing breadcrumbs ...
+00e4:err:vkd3d_breadcrumb_tracer_report_queue_nv: Reporting NVIDIA checkpoints for direct queue 0.
+00e4:err:vkd3d_breadcrumb_tracer_report_queue_nv: Found pending command list context [17, 17] in executable state, TOP_OF_PIPE marker 43, BOTTOM_OF_PIPE marker 41.
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: Command: bottom_marker
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: marker: 41
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: ===== Potential crash region BEGIN (make sure RADV_DEBUG=syncshaders is used for maximum accuracy) =====
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: Command: set_shader_hash
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: hash: 0123456789abcdef, stage: 20
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: Command: dispatch
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: Set arg: 128 (#80)
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: Command: barrier
+00e4:err:vkd3d_breadcrumb_tracer_report_command_list: ===== Potential crash region END =====
+00e4:err:vkd3d_breadcrumb_tracer_report_device_lost: Done analyzing breadcrumbs ...

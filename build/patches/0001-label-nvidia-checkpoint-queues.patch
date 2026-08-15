@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: il2-korea-xid109-diagnostics contributors <noreply@example.invalid>
+Date: Sat, 15 Aug 2026 00:00:00 +0000
+Subject: [PATCH] vkd3d: Label NVIDIA breadcrumb checkpoint queues
+
+This is report-only instrumentation. It does not add checkpoints or alter
+recording, synchronization, queue selection, or submission behavior.
+---
+ libs/vkd3d/breadcrumbs.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/libs/vkd3d/breadcrumbs.c b/libs/vkd3d/breadcrumbs.c
+index b6d982a1..94969bd7 100644
+--- a/libs/vkd3d/breadcrumbs.c
++++ b/libs/vkd3d/breadcrumbs.c
+@@ -504,3 +504,4 @@ static void vkd3d_breadcrumb_tracer_report_command_list_amd(struct vkd3d_breadcr
+ static void vkd3d_breadcrumb_tracer_report_queue_nv(struct vkd3d_breadcrumb_tracer *tracer,
+-        struct d3d12_device *device,
++        struct d3d12_device *device, const char *queue_type,
++        unsigned int queue_index,
+         VkQueue vk_queue)
+@@ -528 +529,4 @@ static void vkd3d_breadcrumb_tracer_report_queue_nv(struct vkd3d_breadcrumb_trac
++    ERR("Reporting NVIDIA checkpoints for %s queue %u.\n",
++            queue_type, queue_index);
++
+     bottom_context_index = UINT32_MAX;
+@@ -622,3 +626,3 @@ void vkd3d_breadcrumb_tracer_report_device_lost(struct vkd3d_breadcrumb_tracer *
+             vk_queue = queue_family_info->queues[i]->vk_queue;
+-            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, vk_queue);
++            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, "direct", i, vk_queue);
+         }
+@@ -630,3 +634,3 @@ void vkd3d_breadcrumb_tracer_report_device_lost(struct vkd3d_breadcrumb_tracer *
+             vk_queue = queue_family_info->queues[i]->vk_queue;
+-            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, vk_queue);
++            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, "compute", i, vk_queue);
+         }
+@@ -638,3 +642,3 @@ void vkd3d_breadcrumb_tracer_report_device_lost(struct vkd3d_breadcrumb_tracer *
+             vk_queue = queue_family_info->queues[i]->vk_queue;
+-            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, vk_queue);
++            vkd3d_breadcrumb_tracer_report_queue_nv(tracer, device, "copy", i, vk_queue);
+         }
