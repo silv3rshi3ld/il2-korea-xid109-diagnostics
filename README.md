@@ -8,6 +8,45 @@ You do not need to understand Linux diagnostics, compile code, edit environment 
 
 Important: this test intentionally attempts to reproduce a GPU timeout. The game, screen, or desktop may freeze or turn black, and a computer restart may be necessary. Save your work and read [Tester safety, privacy, and participation terms](TESTER-TERMS.md) before continuing.
 
+## Can I do this?
+
+This guide is written for a tester who has never used Linux diagnostic tools. You should be able to complete it if you can:
+
+- download and extract an archive;
+- open a terminal in a folder and copy/paste one command at a time;
+- find a game's **Properties** in Steam; and
+- follow the freeze/restart instructions exactly.
+
+You do **not** need to understand the terminal output. You do not need to program, compile anything, install packages, use `sudo`, or diagnose a failure yourself. The optional NVIDIA report is the only step that can use `sudo`, and you must run it only if the investigation coordinator asks.
+
+Keep the coordinator's private chat available throughout the test. If a step differs from this guide, you see `[FAIL]`, `STOP`, or `REVIEW REQUIRED`, or you are unsure what to click, stop and send the coordinator a screenshot or the complete terminal output. Do not guess, repeat a case, change a setting, or try an internet workaround unless the coordinator tells you to.
+
+## What will happen
+
+Nothing starts merely because you extract the archive. You remain in control of every game launch, and nothing is uploaded automatically.
+
+| Stage | What you do | What the assistant does | What to expect |
+|---|---|---|---|
+| Prepare | Save screenshots of three Steam settings, select the required Proton build, and fully exit Steam. | Nothing yet. | Your existing Proton Experimental beta selection may temporarily change. |
+| Set up once | Paste `./il2-diagnostic.sh setup`, read the notice, and type `I AGREE` if you choose to participate. | Checks the computer, copies Proton, verifies the diagnostic files, and registers one private Steam compatibility tool. | Many `[PASS]` lines and several minutes of copying. Official Steam-managed Proton files are not edited. |
+| Configure Steam once | Start Steam and select **IL2 Xid109 Diagnostic** for IL-2 Korea only. | Waits until you launch the game. | Never select this tool for another game. |
+| Run each case | Paste `./il2-diagnostic.sh next`, launch IL-2 from Steam, open the agreed hangar scene, and observe it for ten full minutes or until it fails. | Selects the correct case and records the game, VKD3D, shader, and kernel evidence automatically. | The baseline may stop the investigation early; otherwise there are four controlled cases. |
+| If it freezes | Follow the wait/Steam Stop instructions, or restart the computer if the entire desktop is unusable. | Preserves as much evidence as possible. | After a restart, you paste `./il2-diagnostic.sh recover` before launching the game again. |
+| Finish | Paste `./il2-diagnostic.sh finish` only when instructed, then send the two newly created files privately. | Analyzes the runs and creates one `PRIVATE-...` archive plus its `.sha256` checksum. | The files stay on your computer until you send them. |
+| Restore afterward | Wait for receipt confirmation, run `uninstall`, restore the three saved Steam settings, and later run `trash-copy`. | Disables its private Proton copy and can move that copy to desktop Trash. | Nothing is permanently deleted automatically. |
+
+Allow about one hour for preparation and four runs, possibly longer if the computer must restart or a case needs coordinator review. The tool can require roughly the size of a private Proton copy plus up to 8 GiB for logs and shader dumps.
+
+## How to follow the command instructions
+
+1. Open a terminal **inside the extracted diagnostic folder**. The folder must contain `il2-diagnostic.sh`.
+2. Copy only the command shown inside each grey code box, paste it into the terminal, and press **Enter**. Run one command at a time.
+3. Read the final lines before doing anything else. `[PASS]` is expected. `[FAIL]`, `STOP`, and `REVIEW REQUIRED` mean stop and contact the coordinator.
+4. When a command asks for words such as `I AGREE` or `CREATE PRIVATE ARCHIVE`, type the words exactly as shown and press **Enter**. Any other answer safely cancels that action.
+5. Leave the extracted folder in the same location until testing and uninstall are complete.
+
+You can run `./il2-diagnostic.sh` without another word to display a numbered menu. This guide uses the named commands so that the next action is always explicit.
+
 ## What you need
 
 - The **prepared tester archive** and matching `.sha256` file supplied by the investigation coordinator. The coordinator must also send the expected SHA256 through the existing authenticated private conversation. A normal Git clone is not enough because it intentionally does not contain diagnostic DLL binaries.
