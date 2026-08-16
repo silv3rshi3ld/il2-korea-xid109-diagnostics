@@ -38,6 +38,13 @@ class ConfigurationTests(unittest.TestCase):
         patch_record = source_lock["patches"][0]
         patch = ROOT / patch_record["path"]
         self.assertEqual(hashlib.sha256(patch.read_bytes()).hexdigest(), patch_record["sha256"])
+        self.assertEqual(
+            patch_record["diff_sha256"],
+            "87ff08af931dcfd04acb3000333f716c71117069667da6b3b4c0ddf1d81325be",
+        )
+        self.assertEqual(source_lock["build"]["source_date_epoch"], "1786468653")
+        self.assertEqual(source_lock["build"]["locale"], "C")
+        self.assertEqual(source_lock["build"]["timezone"], "UTC")
 
     def test_runtime_matrix_does_not_enable_optional_fault_or_vk_debug(self) -> None:
         matrix = (ROOT / "config/test-matrix.conf").read_text()
@@ -55,7 +62,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_tester_notice_and_third_party_boundaries_exist(self) -> None:
         terms = (ROOT / "TESTER-TERMS.md").read_text()
         notices = (ROOT / "THIRD-PARTY-NOTICES.md").read_text()
-        self.assertIn("Notice version: `2026-08-15.2`", terms)
+        self.assertIn("Notice version: `2026-08-16.2`", terms)
         self.assertIn("Nothing is uploaded automatically", terms)
         self.assertIn("GNU Lesser General Public License", notices)
         self.assertIn("corresponding-source", notices)

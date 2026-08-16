@@ -67,34 +67,36 @@ class InstallationIntegrationTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(content)
                 artifacts.append({"path": relative, "size": len(content), "sha256": sha256(path)})
+            source_lock = json.loads((repo / "build/source-lock.json").read_text())
             (repo / "build-manifest.json").write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
+                        "build_started_utc": "2026-08-16T10:00:00Z",
+                        "build_finished_utc": "2026-08-16T10:01:00Z",
+                        "toolchain": json.loads(
+                            (ROOT / "build-manifest.json").read_text()
+                        )["toolchain"],
                         "source": {
                             "repository": "https://github.com/HansKristian-Work/vkd3d-proton.git",
                             "commit": EXPECTED_VKD3D,
                             "dirty": True,
                             "status_porcelain": [" M libs/vkd3d/breadcrumbs.c"],
-                            "submodules": json.loads((repo / "build/source-lock.json").read_text())[
-                                "vkd3d_proton"
-                            ]["submodules"],
+                            "submodules": source_lock["vkd3d_proton"]["submodules"],
                             "patch": {
-                                "sha256": json.loads((repo / "build/source-lock.json").read_text())[
-                                    "patches"
-                                ][0]["sha256"],
-                                "diff_sha256": "a" * 64,
+                                "path": source_lock["patches"][0]["path"],
+                                "sha256": source_lock["patches"][0]["sha256"],
+                                "diff_sha256": source_lock["patches"][0]["diff_sha256"],
                             },
                         },
                         "build": {
                             "buildtype": "release",
                             "enable_trace": True,
                             "strip": True,
-                            "meson_arguments": [
-                                "--buildtype=release",
-                                "--strip",
-                                "-Denable_trace=true",
-                            ],
+                            "meson_arguments": source_lock["build"]["meson_arguments"],
+                            "source_date_epoch": source_lock["build"]["source_date_epoch"],
+                            "locale": source_lock["build"]["locale"],
+                            "timezone": source_lock["build"]["timezone"],
                         },
                         "artifacts": artifacts,
                     }
@@ -110,6 +112,9 @@ class InstallationIntegrationTests(unittest.TestCase):
             (baseline / "version").write_text(f"1723725361 {EXPECTED_BUILD}\n")
             (baseline / "compatibilitytool.vdf").write_text("ordinary manifest\n")
             (baseline / "toolmanifest.vdf").write_text("ordinary tool manifest\n")
+            (steam / "steamapps/appmanifest_247970.acf").write_text(
+                '"AppState"\n{\n    "appid"    "247970"\n}\n'
+            )
             make_executable(
                 baseline / "proton",
                 "#!/usr/bin/env bash\n"
@@ -207,7 +212,19 @@ class InstallationIntegrationTests(unittest.TestCase):
             install_manifest = json.loads(
                 (tool / ".il2-xid109-diagnostic/install-manifest.json").read_text()
             )
-            self.assertEqual(install_manifest["tester_notice"]["terms_version"], "2026-08-15.2")
+            self.assertEqual(install_manifest["tester_notice"]["terms_version"], "2026-08-16.2")
+
+            wayland_env = dict(env)
+            wayland_env["XDG_SESSION_TYPE"] = "wayland"
+            wayland_select = subprocess.run(
+                [str(command), "select", "no-descriptor-buffer"],
+                env=wayland_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(wayland_select.returncode, 0)
+            self.assertIn("requires X11", wayland_select.stderr)
 
             select = subprocess.run(
                 [str(command), "select", "no-descriptor-buffer"],
@@ -263,6 +280,12 @@ class InstallationIntegrationTests(unittest.TestCase):
             self.assertTrue((run / "shader-manifest.json").is_file())
             self.assertTrue((run / "run-summary.txt").is_file())
             self.assertTrue((run / "install-manifest.json").is_file())
+            self.assertTrue((run / "proton-runtime-start-utc.txt").is_file())
+            self.assertTrue((run / "proton-runtime-start-epoch.txt").is_file())
+            self.assertGreaterEqual(
+                int((run / "proton-runtime-start-epoch.txt").read_text()),
+                int((run / "start-epoch.txt").read_text()),
+            )
             self.assertIn(
                 "VKD3D_DISABLE_EXTENSIONS=VK_EXT_descriptor_buffer",
                 (run / "environment.txt").read_text(),
@@ -272,7 +295,43 @@ class InstallationIntegrationTests(unittest.TestCase):
             xid_events = json.loads((run / "xid-events.json").read_text())["events"]
             self.assertEqual(xid_events[0]["xid"], 109)
 
+            unauthorized = subprocess.run(
+                [str(tool / "proton"), "run", "synthetic-game.exe"],
+                env=launch_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(unauthorized.returncode, 0)
+            self.assertIn("not authorized by the Next step", unauthorized.stderr)
+            self.assertEqual(
+                len(
+                    [
+                        path
+                        for path in (repo / "results").iterdir()
+                        if path.is_dir() and (path / "metadata.json").is_file()
+                    ]
+                ),
+                1,
+            )
+            status_after_block = subprocess.run(
+                [str(command), "status"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn("Last blocked launch", status_after_block.stdout)
+
             before_signal = set(runs)
+            reselect = subprocess.run(
+                [str(command), "select", "no-descriptor-buffer"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reselect.returncode, 0, reselect.stdout + reselect.stderr)
             blocking_env = dict(launch_env)
             blocking_env["SYNTHETIC_BLOCK"] = "1"
             blocking = subprocess.Popen(
@@ -300,18 +359,46 @@ class InstallationIntegrationTests(unittest.TestCase):
             assert signal_run is not None
             child_pid = int((signal_run / "proton-child.pid").read_text())
             follower_pid = int((signal_run / "journal-follower.pid").read_text())
+            ready = subprocess.run(
+                [str(command), "ready"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(ready.returncode, 0, ready.stdout + ready.stderr)
+            self.assertIn("10-minute hangar observation started", ready.stdout)
+            ready_again = subprocess.run(
+                [str(command), "ready"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(ready_again.returncode, 0, ready_again.stdout + ready_again.stderr)
+            self.assertIn("timer was not restarted", ready_again.stdout)
             blocking.terminate()
             stdout, stderr = blocking.communicate(timeout=5)
             self.assertIn(blocking.returncode, (143, -15), stdout + stderr)
             self.assertTrue((signal_run / ".capture-complete").is_file())
             signal_metadata = json.loads((signal_run / "metadata.json").read_text())
             self.assertTrue(signal_metadata["capture_interrupted"])
+            self.assertIsNotNone(signal_metadata["observation_start_utc"])
+            self.assertIsNotNone(signal_metadata["observation_duration_seconds"])
             self.assertFalse(pathlib.Path(f"/proc/{child_pid}").exists())
             self.assertFalse(pathlib.Path(f"/proc/{follower_pid}").exists())
 
             before_kill = {
                 path for path in (repo / "results").iterdir() if path.is_dir()
             }
+            reselect = subprocess.run(
+                [str(command), "select", "no-descriptor-buffer"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reselect.returncode, 0, reselect.stdout + reselect.stderr)
             killed = subprocess.Popen(
                 [str(tool / "proton"), "run", "synthetic-game.exe"],
                 env=blocking_env,
@@ -369,6 +456,14 @@ class InstallationIntegrationTests(unittest.TestCase):
                     "SYNTHETIC_PROTON_INVOKED": str(invoked),
                 }
             )
+            reselect = subprocess.run(
+                [str(command), "select", "no-descriptor-buffer"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reselect.returncode, 0, reselect.stdout + reselect.stderr)
             follower_failure = subprocess.run(
                 [str(tool / "proton"), "run", "synthetic-game.exe"],
                 env=failed_follower_env,

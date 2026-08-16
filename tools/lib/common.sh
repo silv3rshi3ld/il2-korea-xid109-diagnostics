@@ -6,7 +6,7 @@ readonly IL2_DIAG_TOOL_NAME='IL2 Xid109 Diagnostic'
 readonly IL2_DIAG_IDENTITY='il2-korea-xid109-diagnostics:v1:247970'
 readonly IL2_DIAG_EXPECTED_PROTON_BUILD='experimental-bleeding-edge-11.0-414018-20260814-p3b5456-w34e7d5-d3a4c6f-v238f15'
 readonly IL2_DIAG_EXPECTED_VKD3D_COMMIT='238f157e1d64f90e0d90593557c092ab8af6e0a3'
-readonly IL2_DIAG_TERMS_VERSION='2026-08-15.2'
+readonly IL2_DIAG_TERMS_VERSION='2026-08-16.2'
 # shellcheck disable=SC2034
 readonly IL2_DIAG_RESULTS_HEADROOM_KIB='8388608'
 # shellcheck disable=SC2034
@@ -53,6 +53,24 @@ for match in re.finditer(r'^\s*"path"\s+"((?:\\.|[^"\\])*)"', text, re.MULTILINE
         seen.add(value)
         print(value)
 PY
+}
+
+il2_diag_find_app_manifest() {
+    local steam_root=$1
+    local app_id=$2
+    local library candidate
+    [[ $app_id =~ ^[0-9]+$ ]] || return 1
+    while IFS= read -r library; do
+        [[ -n $library ]] || continue
+        candidate="$library/steamapps/appmanifest_${app_id}.acf"
+        [[ -r $candidate && -f $candidate ]] || continue
+        if grep -Eq -- "^[[:space:]]*\"appid\"[[:space:]]+\"${app_id}\"[[:space:]]*$" \
+            "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done < <(il2_diag_library_roots "$steam_root")
+    return 1
 }
 
 il2_diag_tool_dir() {

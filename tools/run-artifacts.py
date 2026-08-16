@@ -67,6 +67,8 @@ def command_init(args: argparse.Namespace) -> int:
         "start_utc": args.start,
         "end_utc": None,
         "duration_seconds": None,
+        "observation_start_utc": None,
+        "observation_duration_seconds": None,
         "no_xid_observation_target_seconds": policy.get("no_xid_observation_seconds", 600),
         "proton_exit_code": None,
         "capture_complete": False,
@@ -84,10 +86,13 @@ def command_finish(args: argparse.Namespace) -> int:
     metadata = load_json(args.metadata, {})
     metadata["end_utc"] = args.end
     metadata["duration_seconds"] = args.duration
+    metadata["observation_start_utc"] = args.observation_start
+    metadata["observation_duration_seconds"] = args.observation_duration
     metadata["proton_exit_code"] = args.exit_code
     metadata["capture_complete"] = True
     metadata["capture_interrupted"] = args.interrupted
     metadata["recovered_after_interruption"] = args.recovered
+    metadata["kernel_capture_complete"] = args.kernel_capture_complete
     metadata["capture_warnings"] = args.warning
     atomic_json(args.metadata, metadata)
     return 0
@@ -193,7 +198,13 @@ def command_summary(args: argparse.Namespace) -> int:
     lines = [
         f"Run: {run_dir.name}",
         f"Case: {metadata.get('case', 'unknown')}",
-        f"Duration: {metadata.get('duration_seconds', 'unknown')} seconds",
+        f"Proton runtime: {metadata.get('duration_seconds', 'unknown')} seconds",
+        "Hangar observation: "
+        + (
+            f"{metadata['observation_duration_seconds']} seconds"
+            if metadata.get("observation_duration_seconds") is not None
+            else "not recorded"
+        ),
         "",
         "OBSERVED",
         f"- Xid 109: {'yes' if xid109 else 'no'}",
@@ -254,9 +265,12 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--metadata", type=pathlib.Path, required=True)
     finish.add_argument("--end", required=True)
     finish.add_argument("--duration", type=int, required=True)
+    finish.add_argument("--observation-start")
+    finish.add_argument("--observation-duration", type=int)
     finish.add_argument("--exit-code", type=int)
     finish.add_argument("--interrupted", action="store_true")
     finish.add_argument("--recovered", action="store_true")
+    finish.add_argument("--kernel-capture-complete", action="store_true")
     finish.add_argument("--warning", action="append", default=[])
     finish.set_defaults(func=command_finish)
 

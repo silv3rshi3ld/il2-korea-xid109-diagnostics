@@ -54,6 +54,7 @@ class Vkd3dParserTests(unittest.TestCase):
         result = parse_vkd3d_log(self.text)
         self.assertTrue(result["device_lost"])
         self.assertTrue(result["breadcrumb_analysis"])
+        self.assertTrue(result["breadcrumb_analysis_complete"])
         self.assertEqual(len(result["regions"]), 1)
         region = result["regions"][0]
         self.assertEqual(region["queue"], {"type": "direct", "index": 0})
@@ -89,6 +90,17 @@ class Vkd3dParserTests(unittest.TestCase):
             "Command: draw_indexed\n"
         )
         self.assertEqual(result["regions"][0]["commands"], ["draw_indexed"])
+        self.assertFalse(result["regions"][0]["complete_delimiters"])
+        self.assertFalse(result["breadcrumb_analysis_complete"])
+
+    def test_complete_report_can_retain_an_open_ended_region(self) -> None:
+        result = parse_vkd3d_log(
+            "Device lost observed, analyzing breadcrumbs ...\n"
+            "===== Potential crash region BEGIN =====\n"
+            "Command: draw_indexed\n"
+            "Done analyzing breadcrumbs ...\n"
+        )
+        self.assertTrue(result["breadcrumb_analysis_complete"])
         self.assertFalse(result["regions"][0]["complete_delimiters"])
 
     def test_resource_cookie_values_do_not_prevent_region_matching(self) -> None:
