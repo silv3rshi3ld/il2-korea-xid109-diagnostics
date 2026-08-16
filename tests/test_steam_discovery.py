@@ -14,6 +14,37 @@ EXPECTED_VKD3D = "238f157e1d64f90e0d90593557c092ab8af6e0a3"
 
 
 class SteamDiscoveryTests(unittest.TestCase):
+    def test_finds_installed_app_manifest_in_secondary_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            steam = root / "Steam"
+            secondary = root / "Games Library"
+            (steam / "steamapps").mkdir(parents=True)
+            (steam / "steamapps/libraryfolders.vdf").write_text(
+                '"libraryfolders"\n{\n  "1"\n  {\n'
+                f'    "path"    "{secondary}"\n'
+                "  }\n}\n"
+            )
+            manifest = secondary / "steamapps/appmanifest_247970.acf"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('"AppState"\n{\n    "appid"    "247970"\n}\n')
+            env = dict(os.environ)
+            env["IL2_DIAG_STEAM_ROOT"] = str(steam)
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {ROOT / 'tools/lib/common.sh'}; "
+                    'il2_diag_find_app_manifest "$IL2_DIAG_STEAM_ROOT" 247970',
+                ],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(pathlib.Path(result.stdout.strip()), manifest)
+
     def test_finds_exact_proton_in_secondary_library(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

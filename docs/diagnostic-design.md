@@ -46,9 +46,9 @@ The order places the high-value queue discriminator before the heavier synchroni
 
 The copied Proton entry point checks AppID 247970. Other AppIDs are handed directly to the copied `proton.real` with no diagnostic collection environment. Because the copied tree still contains the diagnostic VKD3D DLL, the compatibility tool must never be selected for another game.
 
-For Korea, it locks against concurrent runs, allocates a unique UTC directory, snapshots actual installation/build provenance and system state, records a journal cursor and boot ID, and sets the chosen matrix environment. Before Proton starts, a line-buffered live kernel-journal follower must remain alive through a health check. The follower and managed Proton child do not inherit the run-lock descriptor; both arm Linux's parent-death signal so a forcibly killed launcher does not leave orphan collectors or Proton wrappers.
+For Korea, it locks against concurrent runs, allocates a unique UTC directory, snapshots actual installation/build provenance and system state, records a journal cursor and boot ID, and sets the chosen matrix environment. Before Proton starts, a line-buffered live kernel-journal follower must remain alive through a health check. The follower and managed Proton child do not inherit the run-lock descriptor; both arm Linux's parent-death signal so their direct managed processes receive `SIGTERM` if the launcher disappears. This is not a guarantee that every descendant created later by Proton cannot outlive it.
 
-The launcher runs the unmodified copied `proton.real` as a managed child so TERM, INT, and HUP can be forwarded while Bash is waiting. When Proton returns, normal finalization stops the follower, snapshots the original boot after the cursor, merges the snapshot with the live spool, and produces parsed artifacts. A forced power cycle leaves `.capture-in-progress`; `recover` explicitly queries the saved original boot and incorporates the already-written live spool. Recovered or warned captures require coordinator review and cannot automatically advance the matrix.
+The launcher runs the unmodified copied `proton.real` as a managed child so TERM, INT, and HUP can be forwarded while Bash is waiting. When Proton returns, normal finalization stops the follower, snapshots the original boot after the cursor, merges the snapshot with the live spool, and produces parsed artifacts. A forced power cycle leaves `.capture-in-progress`; `recover` explicitly queries the saved original boot and incorporates the already-written live spool. A recovered or warned failure requires coordinator review. A recovered or warned no-Xid capture is inconclusive and is automatically repeated; neither kind can count as a conclusive case.
 
 `kernel-full.log` is the unfiltered kernel journal from the original boot after the run cursor through finalization/recovery. `kernel-window.log` keeps NVRM, Xid, timeout, and IL2 process lines plus nearby context. Despite the name, the former is not the whole boot journal and does not collect unrelated userspace services. It can contain unrelated kernel events inside that bracket.
 
@@ -60,11 +60,15 @@ The launcher runs the unmodified copied `proton.real` as a managed child so TERM
 
 ## Candidate generation threshold
 
-The analyzer evaluates every parsed crash region. It fingerprints queue identity and ordered command/shader/argument/tag events while normalizing run-local resource-cookie values. It creates the candidate bundle only when at least two distinct runs meet all of these conditions:
+The analyzer evaluates every parsed crash region from the newest capture of each controlled case. It fingerprints queue identity and ordered command/shader/argument/tag events while normalizing run-local resource-cookie values. It creates the candidate bundle only when at least two distinct controlled cases meet all of these conditions:
 
+- complete, internally consistent capture metadata and markers
+- READY recorded before the failure
+- verified raw Proton, VKD3D, and kernel evidence with a consistent parsed Xid cache
 - Xid 109 attributed to `IL2Series.exe`
-- device loss observed
+- completed VKD3D device-loss breadcrumb analysis
 - a nonempty command or shader region parsed
+- no interruption, recovery, capture warning, other Xid, or malformed metadata
 - identical normalized region fingerprints
 
 This deliberately favors precision over aggressive matching. Similar but non-identical regions remain visible in the comparison report without generating a candidate bundle. Re-running analysis with an unchanged matching run set is idempotent and does not duplicate candidate evidence.

@@ -13,22 +13,31 @@
     "submodules": {
       "khronos/SPIRV-Headers": "f88a2d766840fc825af1fc065977953ba1fa4a91",
       "khronos/Vulkan-Headers": "0e9de566b7d4051c5cc1b762e242c46565956bdf",
-      "subprojects/dxil-spirv": "cc75a0c98d34d7bcc03560527c799b52e48b4d1f"
+      "subprojects/dxil-spirv": "cc75a0c98d34d7bcc03560527c799b52e48b4d1f",
+      "subprojects/dxil-spirv/subprojects/dxbc-spirv": "d5b06435fd84843d4c9ee7b3b42d2f3b7b8e3f1a",
+      "subprojects/dxil-spirv/subprojects/dxbc-spirv/submodules/spirv_headers": "c8ad050fcb29e42a2f57d9f59e97488f465c436d",
+      "subprojects/dxil-spirv/third_party/SPIRV-Cross": "4b7bcb7e5cf71015b3299088d22004bfe4e13a5e",
+      "subprojects/dxil-spirv/third_party/SPIRV-Tools": "199cb207b911501ddd76dcddf100a6e21c15ef23",
+      "subprojects/dxil-spirv/third_party/spirv-headers": "c63848ecf2200425511319fd8bf2c17b751e501e"
     }
   },
   "build": {
     "buildtype": "release",
+    "locale": "C",
     "meson_arguments": [
       "--buildtype=release",
       "--strip",
       "-Denable_trace=true"
     ],
-    "source_date_epoch_from": "vkd3d-proton commit timestamp"
+    "source_date_epoch": "1786468653",
+    "source_date_epoch_from": "vkd3d-proton commit timestamp",
+    "timezone": "UTC"
   },
   "patches": [
     {
       "path": "build/patches/0001-label-nvidia-checkpoint-queues.patch",
       "sha256": "40933324b9e33079dd95197cc0fe34b857e21225aed427c6db8786afa4f51297",
+      "diff_sha256": "87ff08af931dcfd04acb3000333f716c71117069667da6b3b4c0ddf1d81325be",
       "purpose": "Report-only labeling of direct, compute, and copy checkpoint queues"
     }
   ]

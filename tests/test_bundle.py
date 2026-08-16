@@ -60,6 +60,42 @@ class TesterBundleVerificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsafe symlink", result.stdout + result.stderr)
 
+    def test_rejects_an_unlisted_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            payload = root / "payload.txt"
+            payload.write_text("declared\n")
+            digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+            (root / "bundle-checksums.sha256").write_text(f"{digest}  payload.txt\n")
+            (root / "not-declared.txt").write_text("unexpected\n")
+            result = subprocess.run(
+                [str(ROOT / "tools/verify-tester-bundle.py"), "--root", str(root)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unlisted bundle file", result.stdout + result.stderr)
+
+    def test_rejects_a_symlinked_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as outside:
+            root = pathlib.Path(temporary)
+            target = pathlib.Path(outside) / "payload.txt"
+            target.write_text("outside\n")
+            (root / "jump").symlink_to(pathlib.Path(outside), target_is_directory=True)
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            (root / "bundle-checksums.sha256").write_text(
+                f"{digest}  jump/payload.txt\n"
+            )
+            result = subprocess.run(
+                [str(ROOT / "tools/verify-tester-bundle.py"), "--root", str(root)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unsafe symlink", result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

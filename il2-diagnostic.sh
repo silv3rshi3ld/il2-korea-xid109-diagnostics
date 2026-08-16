@@ -16,6 +16,7 @@ usage() {
         '  setup       Read terms, check the computer, and install the private tool' \
         '  check       Run read-only checks' \
         '  next        Recover if needed and select the next controlled run' \
+        '  ready       Start the 10-minute timer once the hangar is fully rendered' \
         '  status      Show completed, interrupted, and inconclusive runs' \
         '  recover     Recover a capture after a freeze or reboot' \
         '  finish      Analyze and create the PRIVATE results archive' \
@@ -57,13 +58,15 @@ print_run_instructions() {
         '1. Save work and close unrelated applications.' \
         '2. Launch IL-2 Korea normally from Steam.' \
         '3. Open the same known-failing hangar scene with unchanged graphics settings.' \
-        '4. Start timing only when the hangar is fully rendered.' \
-        '5. If it does not fail, leave it running for 10 full minutes, then exit normally.' \
-        '6. If rendering freezes but the desktop responds, wait 60 seconds for logs to flush,' \
+        '4. When the hangar is fully rendered, return to this folder and run:' \
+        '   ./il2-diagnostic.sh ready' \
+        '5. Start the 10-minute observation only after Ready confirms the timer started.' \
+        '6. If it does not fail, leave it running for 10 full minutes, then exit normally.' \
+        '7. If rendering freezes but the desktop responds, wait 60 seconds for logs to flush,' \
         '   use Steam Stop once, and wait another 30 seconds.' \
-        '7. If the entire desktop remains unusable for about two minutes, restart the computer.' \
+        '8. If the entire desktop remains unusable for about two minutes, restart the computer.' \
         '   After signing in, open this same folder and run ./il2-diagnostic.sh recover.' \
-        '8. After the capture finalizes, run ./il2-diagnostic.sh status, then next.'
+        '9. After the capture finalizes, run ./il2-diagnostic.sh status, then next.'
 }
 
 cmd_next() {
@@ -82,10 +85,10 @@ cmd_next() {
             ;;
         REVIEW)
             printf '%s\n' \
-                'STOP: the latest case captured useful information, but it is interrupted,' \
-                'warned, unattributed, or missing the required breadcrumb/device-lost evidence.' \
+                'STOP: the latest case captured information, but it is not valid for' \
+                'automatic progression. Status explains the missing or conflicting evidence.' \
                 'Do not select another case yet. Send ./il2-diagnostic.sh status output' \
-                'to the investigation coordinator for a decision.'
+                'and your visible-outcome note to the investigation coordinator for a decision.'
             ;;
         COMPLETE)
             printf '%s\n' \
@@ -115,7 +118,9 @@ cmd_finish() {
     "$control" pack
     printf '\n%s\n' \
         'Nothing was uploaded. Send exactly the new PRIVATE results archive and its' \
-        'matching .sha256 file through the privately agreed channel. Do not post them publicly.' \
+        'matching .sha256 file through the privately agreed channel.' \
+        'In the same private chat, paste the visible-outcome note for every run.' \
+        'The notes are not inside the archive. Do not post the files or notes publicly.' \
         'The optional NVIDIA report is separate and should be collected only when requested.'
 }
 
@@ -127,24 +132,26 @@ interactive_menu() {
         '1. First-time setup' \
         '2. Check this computer' \
         '3. Select the next run' \
-        '4. Show progress' \
-        '5. Recover after a freeze/reboot' \
-        '6. Analyze and create the private archive' \
-        '7. Uninstall the custom compatibility tool' \
-        '8. Move a disabled custom Proton copy to desktop Trash' \
-        '9. Read the safety/privacy terms'
-    printf '\nChoose 1-9: '
+        '4. Start the timer after the hangar is fully rendered' \
+        '5. Show progress' \
+        '6. Recover after a freeze/reboot' \
+        '7. Analyze and create the private archive' \
+        '8. Uninstall the custom compatibility tool' \
+        '9. Move a disabled custom Proton copy to desktop Trash' \
+        '10. Read the safety/privacy terms'
+    printf '\nChoose 1-10: '
     IFS= read -r choice
     case $choice in
         1) cmd_setup ;;
         2) "$control" doctor ;;
         3) cmd_next ;;
-        4) "$control" status ;;
-        5) "$control" recover ;;
-        6) cmd_finish ;;
-        7) "$control" uninstall ;;
-        8) "$control" trash-copy ;;
-        9) "$control" terms ;;
+        4) "$control" ready ;;
+        5) "$control" status ;;
+        6) "$control" recover ;;
+        7) cmd_finish ;;
+        8) "$control" uninstall ;;
+        9) "$control" trash-copy ;;
+        10) "$control" terms ;;
         *) printf '%s\n' 'No valid choice selected.' >&2; exit 2 ;;
     esac
 }
@@ -153,6 +160,7 @@ case ${1:-} in
     setup) (($# == 1)) || { usage >&2; exit 2; }; cmd_setup ;;
     check) (($# == 1)) || { usage >&2; exit 2; }; exec "$control" doctor ;;
     next) (($# == 1)) || { usage >&2; exit 2; }; cmd_next ;;
+    ready) (($# == 1)) || { usage >&2; exit 2; }; exec "$control" ready ;;
     status) (($# == 1)) || { usage >&2; exit 2; }; exec "$control" status ;;
     recover) (($# == 1)) || { usage >&2; exit 2; }; exec "$control" recover ;;
     finish) (($# == 1)) || { usage >&2; exit 2; }; cmd_finish ;;

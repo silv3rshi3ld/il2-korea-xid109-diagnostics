@@ -24,6 +24,7 @@ usage() {
         '  uninstall              Disable the custom tool without deleting it' \
         '  trash-copy             Move recognized disabled custom copies to desktop Trash' \
         '  select CASE            Select baseline, single-queue, no-descriptor-buffer, or sync' \
+        '  ready                  Start the observation timer after the hangar is fully rendered' \
         '  recover                Finalize captures interrupted by a freeze or reboot' \
         '  status                 Show installation, selected case, and captured runs' \
         '  analyze                Write results/analysis-summary.{md,json}' \
@@ -46,7 +47,7 @@ baseline_provenance() {
 
 cmd_doctor() {
     local failures=0
-    local command_name steam_root baseline tool_dir extension_output baseline_kib available_kib
+    local command_name steam_root game_manifest baseline tool_dir extension_output baseline_kib available_kib
     local kernel_probe architecture os_id os_like steam_device results_device results_kib required_kib
     local stale_staging journal_help
     printf 'IL-2 Korea Xid109 diagnostic doctor (read-only)\n\n'
@@ -83,9 +84,9 @@ cmd_doctor() {
         failures=$((failures + 1))
     fi
     if python3 "$script_dir/parent-death-exec.py" --self-test >/dev/null 2>&1; then
-        pass 'Linux parent-death signaling is available for crash cleanup'
+        pass 'Linux parent-death signaling is available for managed-process cleanup'
     else
-        fail 'Linux parent-death signaling is unavailable; orphan-safe capture cannot run'
+        fail 'Linux parent-death signaling is unavailable; managed capture cleanup cannot run'
         failures=$((failures + 1))
     fi
 
@@ -101,6 +102,13 @@ cmd_doctor() {
         return 1
     fi
     tool_dir=$(il2_diag_tool_dir)
+    if game_manifest=$(il2_diag_find_app_manifest "$steam_root" 247970); then
+        pass "IL-2 Korea AppID 247970 installation found: $game_manifest"
+    else
+        fail 'IL-2 Korea AppID 247970 is not installed in a native Steam library'
+        printf '%s\n' '       Install the invited test build in Steam, then run setup again.'
+        failures=$((failures + 1))
+    fi
     if baseline=$(il2_diag_baseline_dir) && [[ -x $baseline/proton ]]; then
         pass "Proton Experimental installation found: $baseline"
     else
@@ -161,9 +169,10 @@ cmd_doctor() {
         failures=$((failures + 1))
     fi
 
-    if command -v nvidia-smi >/dev/null 2>&1 && timeout 20s nvidia-smi >/dev/null 2>&1; then
+    if command -v nvidia-smi >/dev/null 2>&1 &&
+        timeout --kill-after=5s 20s nvidia-smi >/dev/null 2>&1; then
         pass 'NVIDIA driver is responding'
-        timeout 20s nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version \
+        timeout --kill-after=5s 20s nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version \
             --format=csv,noheader 2>/dev/null \
             | sed 's/^/       /' || true
     else
@@ -171,8 +180,13 @@ cmd_doctor() {
         failures=$((failures + 1))
     fi
 
-    if command -v vulkaninfo >/dev/null 2>&1; then
-        extension_output=$(timeout 30s vulkaninfo 2>/dev/null || true)
+    if ! command -v vulkaninfo >/dev/null 2>&1; then
+        fail 'vulkaninfo is required (Arch package: vulkan-tools)'
+        failures=$((failures + 1))
+    elif ! extension_output=$(timeout --kill-after=5s 30s vulkaninfo 2>/dev/null); then
+        fail 'vulkaninfo did not complete successfully; Vulkan capabilities could not be verified'
+        failures=$((failures + 1))
+    else
         if grep -Fq 'VK_NV_device_diagnostic_checkpoints' <<<"$extension_output"; then
             pass 'VK_NV_device_diagnostic_checkpoints is exposed'
         else
@@ -188,9 +202,6 @@ cmd_doctor() {
         if grep -Fq 'VK_EXT_device_fault' <<<"$extension_output"; then
             warn 'VK_EXT_device_fault is exposed but intentionally not enabled in the default matrix'
         fi
-    else
-        fail 'vulkaninfo is required (Arch package: vulkan-tools)'
-        failures=$((failures + 1))
     fi
 
     if [[ -n $baseline && -d $baseline ]]; then
@@ -301,10 +312,6 @@ cmd_install() {
     steam_root=$(il2_diag_find_steam_root)
     baseline=$(il2_diag_baseline_dir)
     tool_dir=$(il2_diag_tool_dir)
-    [[ ! -e $tool_dir ]] || {
-        printf 'error: diagnostic tool already exists; use status or uninstall first\n' >&2
-        exit 1
-    }
     source_core="$artifact_root/x64/d3d12core.dll"
     [[ -f $source_core && ! -L $source_core ]] || {
         printf 'error: missing or unsafe diagnostic DLL: %s\n' "$source_core" >&2
@@ -315,6 +322,10 @@ cmd_install() {
     lock_file="$steam_root/compatibilitytools.d/.il2-xid109-install.lock"
     exec 8>"$lock_file"
     flock -n 8 || { printf 'error: another install/uninstall operation is active\n' >&2; exit 1; }
+    [[ ! -e $tool_dir ]] || {
+        printf 'error: diagnostic tool already exists; use status or uninstall first\n' >&2
+        exit 1
+    }
     staging="$steam_root/compatibilitytools.d/.IL2-Xid109-installing-$$"
     [[ ! -e $staging ]] || { printf 'error: staging path already exists: %s\n' "$staging" >&2; exit 1; }
 
@@ -527,13 +538,93 @@ cmd_recover() {
     fi
 }
 
+cmd_ready() {
+    local marker run_dir proton_pid observation_epoch observation_utc
+    local epoch_tmp utc_tmp record_tmp
+    local -a markers=()
+    while IFS= read -r -d '' marker; do
+        markers+=("$marker")
+    done < <(find "$repo_dir/results" -mindepth 2 -maxdepth 2 -type f \
+        -name .capture-in-progress -print0 2>/dev/null)
+    if ((${#markers[@]} == 0)); then
+        printf '%s\n' \
+            'error: no active diagnostic run was found' \
+            'Run ./il2-diagnostic.sh next, launch IL-2, and use ready only after the hangar renders.' >&2
+        exit 1
+    fi
+    if ((${#markers[@]} != 1)); then
+        printf '%s\n' \
+            'error: more than one unfinished capture exists, so the active run is ambiguous' \
+            'Close the game, run ./il2-diagnostic.sh recover, then review status.' >&2
+        exit 1
+    fi
+    run_dir=${markers[0]%/.capture-in-progress}
+    exec 7>"$run_dir/observation-start.lock"
+    flock -n 7 || {
+        printf '%s\n' 'error: another Ready operation is already recording the timer' >&2
+        exit 1
+    }
+    [[ -f $run_dir/.capture-in-progress ]] || {
+        printf '%s\n' 'error: the run finalized before Ready could record the timer; check status' >&2
+        exit 1
+    }
+    if [[ ! -r $run_dir/proton-runtime-start-epoch.txt ||
+          ! $(<"$run_dir/proton-runtime-start-epoch.txt") =~ ^[0-9]+$ ||
+          ! -r $run_dir/proton-child.pid ||
+          ! $(<"$run_dir/proton-child.pid") =~ ^[0-9]+$ ]]; then
+        printf '%s\n' \
+            'error: the game process is not ready yet; wait a moment and try Ready again' >&2
+        exit 1
+    fi
+    proton_pid=$(<"$run_dir/proton-child.pid")
+    if ! kill -0 "$proton_pid" 2>/dev/null; then
+        printf '%s\n' \
+            'error: the game is no longer running; Ready did not start a timer' \
+            'Run ./il2-diagnostic.sh status before doing anything else.' >&2
+        exit 1
+    fi
+    if [[ -f $run_dir/.observation-start-recorded ]]; then
+        if [[ -r $run_dir/observation-start-utc.txt &&
+              -n $(<"$run_dir/observation-start-utc.txt") &&
+              -r $run_dir/observation-start-epoch.txt &&
+              $(<"$run_dir/observation-start-epoch.txt") =~ ^[0-9]+$ ]]; then
+            printf 'Ready was already recorded for this run at %s. The timer was not restarted.\n' \
+                "$(<"$run_dir/observation-start-utc.txt")"
+            return 0
+        fi
+        printf '%s\n' \
+            'error: the existing Ready marker is incomplete; stop and contact the coordinator' >&2
+        exit 1
+    fi
+    observation_epoch=$(date +%s)
+    observation_utc=$(date -u -d "@$observation_epoch" +%Y-%m-%dT%H:%M:%SZ)
+    epoch_tmp="$run_dir/observation-start-epoch.txt.tmp.$$"
+    utc_tmp="$run_dir/observation-start-utc.txt.tmp.$$"
+    record_tmp="$run_dir/.observation-start-recorded.tmp.$$"
+    printf '%s\n' "$observation_epoch" >"$epoch_tmp"
+    printf '%s\n' "$observation_utc" >"$utc_tmp"
+    printf 'observation timer recorded\n' >"$record_tmp"
+    mv -- "$epoch_tmp" "$run_dir/observation-start-epoch.txt"
+    mv -- "$utc_tmp" "$run_dir/observation-start-utc.txt"
+    mv -- "$record_tmp" "$run_dir/.observation-start-recorded"
+    printf '%s\n' \
+        "Ready: the 10-minute hangar observation started at $observation_utc." \
+        'Return to the unchanged hangar now. Exit normally only after 10 full minutes without a failure.'
+}
+
 cmd_select() {
-    local wanted=${1:-} tool_dir state_dir temporary
+    local wanted=${1:-} tool_dir state_dir temporary authorization authorization_tmp
     [[ -n $wanted ]] || { printf 'error: select requires a case\n' >&2; il2_diag_list_cases "$matrix" >&2; exit 2; }
     if il2_diag_has_incomplete_runs "$repo_dir"; then
         printf '%s\n' \
             'error: an interrupted capture must be recovered before selecting another case' \
             '  ./tools/il2-diag.sh recover' >&2
+        exit 1
+    fi
+    if [[ ${XDG_SESSION_TYPE:-unknown} != x11 ]]; then
+        printf 'error: the controlled test requires X11; current session is %s\n' \
+            "${XDG_SESSION_TYPE:-unknown}" >&2
+        printf '%s\n' 'Stop and ask the coordinator before changing login-session settings.' >&2
         exit 1
     fi
     il2_diag_matrix_lookup "$matrix" "$wanted" >/dev/null || {
@@ -547,11 +638,26 @@ cmd_select() {
         printf 'error: install the diagnostic compatibility tool first\n' >&2
         exit 1
     }
+    exec 9>"$state_dir/run.lock"
+    flock -n 9 || {
+        printf '%s\n' 'error: an IL-2 diagnostic run is already active' >&2
+        exit 1
+    }
     temporary="$state_dir/selected-case.tmp.$$"
+    authorization="$state_dir/run-authorization"
+    authorization_tmp="$authorization.tmp.$$"
     printf '%s\n' "$wanted" >"$temporary"
+    {
+        printf 'case=%s\n' "$wanted"
+        printf 'authorized_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >"$authorization_tmp"
     mv -- "$temporary" "$state_dir/selected-case"
+    mv -- "$authorization_tmp" "$authorization"
+    rm -f -- "$repo_dir/.state/last-launch-error.txt"
     printf 'Selected case: %s\n' "$wanted"
-    printf '%s\n' 'Launch IL-2 Korea normally through Steam and reproduce once.'
+    printf '%s\n' \
+        'One IL-2 diagnostic launch is now authorized.' \
+        'Launch it normally through Steam and reproduce once.'
 }
 
 cmd_status() {
@@ -565,6 +671,10 @@ cmd_status() {
         printf 'Installation: %s\n' "$tool_dir"
     else
         printf 'Installation: not installed\n'
+    fi
+    if [[ -r $repo_dir/.state/last-launch-error.txt ]]; then
+        printf 'Last blocked launch:\n'
+        sed 's/^/  /' "$repo_dir/.state/last-launch-error.txt"
     fi
     printf 'Selected case: %s\n' "$selected"
     printf '\n'
@@ -598,6 +708,7 @@ case $command_name in
     uninstall) shift; (($# == 0)) || { usage >&2; exit 2; }; cmd_uninstall ;;
     trash-copy) shift; (($# == 0)) || { usage >&2; exit 2; }; cmd_trash_copy ;;
     select) shift; (($# == 1)) || { usage >&2; exit 2; }; cmd_select "$1" ;;
+    ready) shift; (($# == 0)) || { usage >&2; exit 2; }; cmd_ready ;;
     recover) shift; (($# == 0)) || { usage >&2; exit 2; }; cmd_recover ;;
     status) shift; (($# == 0)) || { usage >&2; exit 2; }; cmd_status ;;
     analyze) shift; (($# == 0)) || { usage >&2; exit 2; }; require_no_incomplete_runs; exec python3 "$repo_dir/analyzer/analyze.py" ;;

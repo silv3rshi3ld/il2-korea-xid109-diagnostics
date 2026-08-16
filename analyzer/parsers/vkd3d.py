@@ -54,8 +54,15 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
     current_queue: dict[str, Any] | None = None
     pending: dict[str, Any] | None = None
     region: dict[str, Any] | None = None
+    report_started = False
+    report_complete = False
 
     for line_number, line in enumerate(text.splitlines(), start=1):
+        if REPORT_BEGIN.lower() in line.lower():
+            report_started = True
+        if report_started and REPORT_END.lower() in line.lower():
+            report_complete = True
+
         queue = QUEUE_RE.search(line)
         if queue:
             current_queue = {
@@ -135,7 +142,8 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
     return {
         "device_lost": device["device_lost"],
         "first_device_lost": device["first"],
-        "breadcrumb_analysis": REPORT_BEGIN.lower() in text.lower(),
+        "breadcrumb_analysis": report_started,
+        "breadcrumb_analysis_complete": report_complete,
         "regions": regions,
     }
 

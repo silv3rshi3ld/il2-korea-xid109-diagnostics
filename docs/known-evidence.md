@@ -2,7 +2,7 @@
 
 ## Affected configuration
 
-- Tester: `@SunnyOd`
+- Invited affected-system tester
 - CachyOS, X11
 - Ryzen 9 9950X3D
 - two NVIDIA RTX 3090 GPUs

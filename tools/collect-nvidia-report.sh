@@ -35,8 +35,9 @@ command -v nvidia-bug-report.sh >/dev/null 2>&1 || {
     printf 'error: nvidia-bug-report.sh is not installed\n' >&2
     exit 1
 }
-if [[ -d $report_dir ]] && find "$report_dir" -maxdepth 1 -type f -name 'nvidia-bug-report*.log.gz' -print -quit \
-    | grep -q .; then
+if [[ -d $report_dir ]] && find "$report_dir" -maxdepth 1 -type f \
+    \( -name 'nvidia-bug-report*.log' -o -name 'nvidia-bug-report*.log.gz' \) \
+    -print -quit | grep -q .; then
     printf 'A report already exists in %s. One representative report is normally sufficient.\n' "$report_dir" >&2
     printf 'Move that report elsewhere first only if a new report is diagnostically necessary.\n' >&2
     exit 1

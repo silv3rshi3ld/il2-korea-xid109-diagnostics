@@ -40,6 +40,26 @@ selected_case=$(<"$case_file")
     exit 1
 }
 
+record_launch_error() {
+    local message=$1 error_file error_tmp
+    mkdir -p -- "$repo_dir/.state"
+    error_file="$repo_dir/.state/last-launch-error.txt"
+    error_tmp="$error_file.tmp.$$"
+    {
+        printf 'time_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'message=%s\n' "$message"
+    } >"$error_tmp"
+    mv -- "$error_tmp" "$error_file"
+}
+
+if [[ ${XDG_SESSION_TYPE:-unknown} != x11 ]]; then
+    record_launch_error "session was ${XDG_SESSION_TYPE:-unknown}, not X11; the game was not started"
+    printf '%s\n' \
+        'error: the controlled diagnostic launch requires an X11 session.' \
+        'Do not change login-session settings without asking the investigation coordinator.' >&2
+    exit 1
+fi
+
 case_record=$(il2_diag_matrix_lookup "$matrix" "$selected_case") || {
     printf 'error: invalid selected diagnostic case: %s\n' "$selected_case" >&2
     exit 1
@@ -48,6 +68,7 @@ IFS='|' read -r case_name vkd3d_config disabled_extensions case_description <<<"
 
 kernel_probe=$(journalctl -k -n 1 -o cat --no-pager 2>/dev/null || true)
 if [[ -z $kernel_probe ]]; then
+    record_launch_error 'kernel journal access was unavailable; the game was not started'
     printf '%s\n' \
         'error: kernel journal access is unavailable, so an NVIDIA Xid could not be captured.' \
         'Run ./il2-diagnostic.sh check and send its output to the investigation coordinator.' >&2
@@ -56,13 +77,25 @@ fi
 
 available_kib=$(df -Pk -- "$repo_dir" | awk 'NR == 2 {print $4}')
 if [[ ! $available_kib =~ ^[0-9]+$ ]] || ((available_kib < IL2_DIAG_PER_RUN_HEADROOM_KIB)); then
+    record_launch_error 'less than 2 GiB of result space was available; the game was not started'
     printf 'error: at least 2 GiB of free result space is required before each run\n' >&2
     exit 1
 fi
 
 exec 9>"$state_dir/run.lock"
 if ! flock -n 9; then
+    record_launch_error 'another diagnostic run was already active; the game was not started'
     printf 'error: another IL-2 diagnostic run is already active\n' >&2
+    exit 1
+fi
+
+authorization="$state_dir/run-authorization"
+if [[ ! -f $authorization || -L $authorization ]] ||
+    ! grep -Fxq -- "case=$case_name" "$authorization"; then
+    record_launch_error 'no one-use launch authorization was available; run ./il2-diagnostic.sh next'
+    printf '%s\n' \
+        'error: this diagnostic launch was not authorized by the Next step.' \
+        'Return to the extracted folder and run ./il2-diagnostic.sh next before clicking Play.' >&2
     exit 1
 fi
 
@@ -78,6 +111,13 @@ for suffix in '' '-2' '-3' '-4' '-5' '-6' '-7' '-8' '-9'; do
     fi
 done
 [[ -n $run_dir ]] || { printf 'error: could not allocate a unique run directory\n' >&2; exit 1; }
+if ! mv -- "$authorization" "$run_dir/run-authorization.txt"; then
+    rmdir -- "$run_dir"
+    record_launch_error 'the one-use launch authorization could not be consumed'
+    printf '%s\n' 'error: could not consume the one-use diagnostic launch authorization' >&2
+    exit 1
+fi
+rm -f -- "$repo_dir/.state/last-launch-error.txt"
 mkdir -p -- "$run_dir/shaders"
 printf 'capture started; this file becomes .capture-complete during normal finalization\n' \
     >"$run_dir/.capture-in-progress"
@@ -226,6 +266,12 @@ if ! kill -0 "$journal_pid" 2>/dev/null; then
 fi
 
 printf 'IL-2 Xid109 diagnostics: starting %s run in %s\n' "$case_name" "$run_dir" >&2
+# This timestamp excludes harness preflight. It is the Proton process-runtime start,
+# not the tester's hangar-ready observation time.
+proton_runtime_start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+proton_runtime_start_epoch=$(date +%s)
+printf '%s\n' "$proton_runtime_start_utc" >"$run_dir/proton-runtime-start-utc.txt"
+printf '%s\n' "$proton_runtime_start_epoch" >"$run_dir/proton-runtime-start-epoch.txt"
 set +e
 python3 "$repo_dir/tools/parent-death-exec.py" "$real_proton" "$@" 9>&- &
 proton_pid=$!

@@ -48,24 +48,53 @@ add_warning() {
 }
 
 if [[ -r $run_dir/start-epoch.txt ]] && [[ $(<"$run_dir/start-epoch.txt") =~ ^[0-9]+$ ]]; then
-    start_epoch=$(<"$run_dir/start-epoch.txt")
+    capture_start_epoch=$(<"$run_dir/start-epoch.txt")
 else
-    start_epoch=$(stat -c %Y -- "$run_dir/.capture-in-progress" 2>/dev/null || date +%s)
+    capture_start_epoch=$(stat -c %Y -- "$run_dir/.capture-in-progress" 2>/dev/null || date +%s)
     add_warning 'start epoch was missing; used the capture-marker timestamp'
 fi
 if [[ -r $run_dir/start-utc.txt ]] && [[ -n $(<"$run_dir/start-utc.txt") ]]; then
-    start_utc=$(<"$run_dir/start-utc.txt")
+    capture_start_utc=$(<"$run_dir/start-utc.txt")
 else
-    start_utc=$(date -u -d "@$start_epoch" +%Y-%m-%dT%H:%M:%SZ)
+    capture_start_utc=$(date -u -d "@$capture_start_epoch" +%Y-%m-%dT%H:%M:%SZ)
     add_warning 'start UTC timestamp was missing; reconstructed it from the capture marker'
+fi
+if [[ -r $run_dir/proton-runtime-start-epoch.txt ]] &&
+    [[ $(<"$run_dir/proton-runtime-start-epoch.txt") =~ ^[0-9]+$ ]]; then
+    runtime_start_epoch=$(<"$run_dir/proton-runtime-start-epoch.txt")
+else
+    runtime_start_epoch=$capture_start_epoch
+    add_warning 'Proton runtime start was missing; duration includes capture preflight'
 fi
 end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 end_epoch=$(date +%s)
-if [[ ! $start_epoch =~ ^[0-9]+$ ]] || ((end_epoch < start_epoch)); then
-    start_epoch=$end_epoch
-    add_warning 'invalid start timestamp; duration could not be reconstructed'
+if [[ ! $runtime_start_epoch =~ ^[0-9]+$ ]] || ((end_epoch < runtime_start_epoch)); then
+    runtime_start_epoch=$end_epoch
+    add_warning 'invalid Proton runtime start timestamp; duration could not be reconstructed'
 fi
-duration=$((end_epoch - start_epoch))
+duration=$((end_epoch - runtime_start_epoch))
+observation_start_utc=''
+observation_duration=''
+exec 7>"$run_dir/observation-start.lock"
+flock 7
+if [[ -f $run_dir/.observation-start-recorded &&
+      -r $run_dir/observation-start-epoch.txt &&
+      -r $run_dir/observation-start-utc.txt &&
+      -n $(<"$run_dir/observation-start-utc.txt") &&
+      $(<"$run_dir/observation-start-epoch.txt") =~ ^[0-9]+$ ]]; then
+    observation_start_epoch=$(<"$run_dir/observation-start-epoch.txt")
+    observation_start_utc=$(<"$run_dir/observation-start-utc.txt")
+    if ((observation_start_epoch >= runtime_start_epoch && end_epoch >= observation_start_epoch)); then
+        observation_duration=$((end_epoch - observation_start_epoch))
+    else
+        add_warning 'invalid hangar observation start timestamp; observation duration is unavailable'
+    fi
+elif [[ -f $run_dir/.observation-start-recorded ||
+        -e $run_dir/observation-start-epoch.txt ||
+        -e $run_dir/observation-start-utc.txt ]]; then
+    add_warning 'hangar observation start record is incomplete; observation duration is unavailable'
+fi
+flock -u 7
 
 steam_log="$run_dir/steam-247970.log"
 if [[ -f $steam_log ]]; then
@@ -74,7 +103,7 @@ fi
 home_proton_log="$HOME/steam-247970.log"
 if [[ -f $home_proton_log ]]; then
     home_log_mtime=$(stat -c %Y -- "$home_proton_log" 2>/dev/null || printf 0)
-    if [[ $home_log_mtime =~ ^[0-9]+$ ]] && ((home_log_mtime >= start_epoch)); then
+    if [[ $home_log_mtime =~ ^[0-9]+$ ]] && ((home_log_mtime >= runtime_start_epoch)); then
         cp -a -- "$home_proton_log" "$run_dir/proton-home.log"
         if [[ ! -f $run_dir/proton.log ]]; then
             cp -a -- "$home_proton_log" "$run_dir/proton.log"
@@ -84,10 +113,14 @@ fi
 if [[ ! -f $run_dir/proton.log ]]; then
     add_warning 'Proton log was not created'
     : >"$run_dir/proton.log"
+elif [[ ! -s $run_dir/proton.log ]]; then
+    add_warning 'Proton log is empty'
 fi
 if [[ ! -f $run_dir/vkd3d.log ]]; then
     add_warning 'VKD3D log was not created'
     : >"$run_dir/vkd3d.log"
+elif [[ ! -s $run_dir/vkd3d.log ]]; then
+    add_warning 'VKD3D log is empty'
 fi
 
 journal_cursor=''
@@ -115,7 +148,7 @@ if command -v journalctl >/dev/null 2>&1; then
         --after-cursor="$journal_cursor" -o short-iso-precise --no-hostname --no-pager \
         >"$journal_snapshot" 2>>"$journal_errors"; then
         journal_ok=1
-    elif journalctl -k "${boot_args[@]}" --since "$start_utc" --until "$end_utc" \
+    elif journalctl -k "${boot_args[@]}" --since "$capture_start_utc" --until "$end_utc" \
         -o short-iso-precise --no-hostname --no-pager \
         >"$journal_snapshot" 2>>"$journal_errors"; then
         journal_ok=1
@@ -130,20 +163,23 @@ if [[ -s $run_dir/journal-follow-errors.log ]]; then
     add_warning 'live kernel journal collector reported an error; see journal-follow-errors.log'
 fi
 
-if ! python3 "$script_dir/merge-kernel-logs.py" --output "$run_dir/kernel-full.log" \
+kernel_merge_ok=0
+if python3 "$script_dir/merge-kernel-logs.py" --output "$run_dir/kernel-full.log" \
     "$journal_snapshot" "$run_dir/kernel-live.log"; then
+    kernel_merge_ok=1
+else
     add_warning 'kernel journal merge failed'
     : >"$run_dir/kernel-full.log"
-fi
-if [[ ! -s $run_dir/kernel-full.log ]]; then
-    add_warning 'kernel capture is empty'
 fi
 if ! python3 "$script_dir/filter-kernel-context.py" \
     --input "$run_dir/kernel-full.log" --output "$run_dir/kernel-window.log"; then
     add_warning 'kernel context filtering failed'
 fi
-if ! python3 "$script_dir/run-artifacts.py" xids \
+xid_parse_ok=0
+if python3 "$script_dir/run-artifacts.py" xids \
     --input "$run_dir/kernel-full.log" --output "$run_dir/xid-events.json"; then
+    xid_parse_ok=1
+else
     add_warning 'Xid parsing failed'
 fi
 if ! python3 "$script_dir/run-artifacts.py" breadcrumbs \
@@ -157,9 +193,14 @@ if ! python3 "$script_dir/run-artifacts.py" shaders \
 fi
 
 finish_args=(finish --metadata "$run_dir/metadata.json" --end "$end_utc" --duration "$duration")
+[[ -n $observation_start_utc ]] && finish_args+=(--observation-start "$observation_start_utc")
+[[ -n $observation_duration ]] && finish_args+=(--observation-duration "$observation_duration")
 [[ -n $exit_code ]] && finish_args+=(--exit-code "$exit_code")
 ((interrupted)) && finish_args+=(--interrupted)
 ((recovered)) && finish_args+=(--recovered)
+if ((journal_ok && kernel_merge_ok && xid_parse_ok)); then
+    finish_args+=(--kernel-capture-complete)
+fi
 while IFS= read -r warning; do
     [[ -n $warning ]] && finish_args+=(--warning "$warning")
 done <"$warnings_file"

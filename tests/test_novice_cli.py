@@ -7,6 +7,8 @@ import tempfile
 import unittest
 import json
 
+from analyzer.parsers import parse_kernel_log
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -44,6 +46,22 @@ class NoviceCliTests(unittest.TestCase):
             self.assertIn("not ready", result.stderr)
             self.assertFalse(any(repo.glob("PRIVATE-il2-xid109-results-*")))
 
+    def test_finish_rejects_an_unrecognized_candidate_before_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = self.copy_repo(temporary)
+            candidate = repo / "results/culprit-candidate"
+            candidate.mkdir()
+            (candidate / "private-note.txt").write_text("not analyzer output\n")
+            result = subprocess.run(
+                [str(repo / "tools/pack-results.sh")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unrecognized culprit-candidate", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_finish_packs_one_complete_private_matrix_and_excludes_nvidia_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = self.copy_repo(temporary)
@@ -62,35 +80,34 @@ class NoviceCliTests(unittest.TestCase):
                         {
                             "case": case,
                             "capture_complete": True,
+                            "kernel_capture_complete": True,
                             "capture_warnings": [],
                             "capture_interrupted": False,
                             "duration_seconds": 90,
+                            "observation_start_utc": "2026-08-15T12:00:10Z",
+                            "observation_duration_seconds": 90,
                             "proton_exit_code": 0,
                         }
                     )
                 )
+                (run / ".observation-start-recorded").touch()
                 (run / "kernel-full.log").write_text(kernel)
                 (run / "vkd3d.log").write_text(vkd3d)
                 (run / "proton.log").write_text(proton)
                 (run / "xid-events.json").write_text(
-                    json.dumps(
-                        {
-                            "events": [
-                                {
-                                    "xid": 109,
-                                    "name": "IL2Series.exe",
-                                    "pci": "0000:01:00",
-                                    "channel": "0x28",
-                                    "info": "0x1c022",
-                                }
-                            ]
-                        }
-                    )
+                    json.dumps({"events": parse_kernel_log(kernel)})
                 )
                 (run / "shader-manifest.json").write_text('{"shaders": []}\n')
+                if index == 0:
+                    (run / "observation-start-utc.txt.tmp.123").write_text(
+                        "unfinished READY write\n"
+                    )
             private_report = repo / "results/nvidia-reports/private.log.gz"
             private_report.parent.mkdir()
             private_report.write_bytes(b"must stay separate")
+            stale_candidate = repo / "results/culprit-candidate.previous-2026-08-15T000000Z"
+            stale_candidate.mkdir()
+            (stale_candidate / "must-not-ship.txt").write_text("stale generated evidence\n")
 
             result = subprocess.run(
                 [str(repo / "il2-diagnostic.sh"), "finish"],
@@ -109,9 +126,27 @@ class NoviceCliTests(unittest.TestCase):
             self.assertTrue(pathlib.Path(str(archives[0]) + ".sha256").is_file())
             listing = subprocess.check_output(["tar", "-tf", str(archives[0])], text=True)
             self.assertNotIn("nvidia-reports", listing)
+            self.assertNotIn("culprit-candidate.previous", listing)
+            self.assertNotIn("tmp.123", listing)
             self.assertIn("results/analysis-summary.json", listing)
             self.assertIn("results/culprit-candidate/README.md", listing)
-            self.assertFalse(any((repo / "results").glob("culprit-candidate.previous-*")))
+            self.assertTrue(stale_candidate.is_dir())
+            checksum = pathlib.Path(str(archives[0]) + ".sha256")
+            self.assertNotIn(str(repo), checksum.read_text())
+            received = pathlib.Path(temporary) / "received"
+            received.mkdir()
+            received_archive = received / archives[0].name
+            received_checksum = received / checksum.name
+            shutil.move(archives[0], received_archive)
+            shutil.move(checksum, received_checksum)
+            verified = subprocess.run(
+                ["sha256sum", "-c", received_checksum.name],
+                cwd=received,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
 
 
 if __name__ == "__main__":
