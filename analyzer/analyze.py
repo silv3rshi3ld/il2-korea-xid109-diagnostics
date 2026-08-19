@@ -19,11 +19,24 @@ RESULTS_ROOT = REPO_ROOT / "results"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from analyzer.parsers import parse_kernel_log, parse_proton_log, parse_vkd3d_log  # noqa: E402
+from analyzer.parsers import (  # noqa: E402
+    parse_descriptor_qa_faults,
+    parse_kernel_log,
+    parse_proton_log,
+    parse_vkd3d_log,
+)
 
 
+CASES = (
+    "baseline",
+    "descriptor-qa",
+    "descriptor-heap",
+    "single-queue",
+    "no-descriptor-buffer",
+    "sync",
+)
 RUN_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{6}Z-(baseline|single-queue|no-descriptor-buffer|sync)(?:-\d+)?$"
+    r"^\d{4}-\d{2}-\d{2}T\d{6}Z-(" + "|".join(CASES) + r")(?:-\d+)?$"
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SHADER_HASH_RE = re.compile(r"^[0-9a-f]{8,16}$")
@@ -93,6 +106,50 @@ def region_summary(region: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def descriptor_fault_signature(fault: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in fault.items()
+        if key not in {"start_line", "end_line", "source", "shader_dump_files"}
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def collect_descriptor_faults(
+    descriptor_qa_text: str,
+    vkd3d_faults: list[dict[str, Any]],
+    shader_manifest: Any,
+) -> list[dict[str, Any]]:
+    faults: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    sources = (
+        ("descriptor-qa.log", parse_descriptor_qa_faults(descriptor_qa_text)),
+        ("vkd3d.log", vkd3d_faults),
+    )
+    shader_entries = shader_manifest.get("shaders", []) if isinstance(shader_manifest, dict) else []
+    for source, parsed in sources:
+        for parsed_fault in parsed:
+            signature = descriptor_fault_signature(parsed_fault)
+            if signature in seen:
+                continue
+            fault = dict(parsed_fault)
+            fault["source"] = source
+            shader_hash = str(fault.get("shader_hash") or "").lower().zfill(16)
+            fault["shader_dump_files"] = sorted(
+                {
+                    entry["file"]
+                    for entry in shader_entries
+                    if isinstance(entry, dict)
+                    and isinstance(entry.get("file"), str)
+                    and isinstance(entry.get("vkd3d_hash"), str)
+                    and entry["vkd3d_hash"].lower().zfill(16) == shader_hash
+                }
+            )
+            faults.append(fault)
+            seen.add(signature)
+    return faults
+
+
 def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
     analysis_warnings: list[str] = []
     metadata_path = run_dir / "metadata.json"
@@ -146,6 +203,8 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
             f"kernel-full.log contains {len(other_xid_events)} non-target NVIDIA Xid event(s)"
         )
     vkd3d_text = read_text(run_dir / "vkd3d.log")
+    descriptor_qa_path = run_dir / "descriptor-qa.log"
+    descriptor_qa_text = read_text(descriptor_qa_path)
     proton_text = read_text(run_dir / "proton.log")
     empty_raw_logs = [
         name
@@ -164,6 +223,15 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
         analysis_warnings.append("kernel journal collection was not verified as complete")
     vkd3d = parse_vkd3d_log(vkd3d_text)
     proton = parse_proton_log(proton_text)
+    shader_manifest = read_json(run_dir / "shader-manifest.json", {})
+    descriptor_faults = collect_descriptor_faults(
+        descriptor_qa_text,
+        vkd3d["descriptor_qa_faults"],
+        shader_manifest,
+    )
+    descriptor_qa_log_present = descriptor_qa_path.is_file() and bool(descriptor_qa_text.strip())
+    if path_case == "descriptor-qa" and not descriptor_qa_log_present:
+        analysis_warnings.append("descriptor-qa.log is missing or empty for descriptor-qa case")
     regions = vkd3d["regions"]
     primary = regions[0] if regions else None
     device_lost = bool(vkd3d["device_lost"] or proton["device_lost"])
@@ -253,6 +321,8 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
         outcome_parts.append("unattributed Xid 109 also present")
     if regions:
         outcome_parts.append(f"{len(regions)} crash region(s)")
+    if descriptor_faults:
+        outcome_parts.append(f"{len(descriptor_faults)} descriptor QA fault(s)")
     if analysis_warnings:
         outcome_parts.append(f"{len(analysis_warnings)} analysis warning(s)")
 
@@ -288,6 +358,8 @@ def summarize_run(run_dir: pathlib.Path) -> dict[str, Any]:
         "first_device_lost": first_lost,
         "breadcrumb_analysis": vkd3d["breadcrumb_analysis"],
         "breadcrumb_analysis_complete": vkd3d["breadcrumb_analysis_complete"],
+        "descriptor_qa_log_present": descriptor_qa_log_present,
+        "descriptor_qa_faults": descriptor_faults,
         "regions": clean_regions,
         "region_fingerprints": [
             region["fingerprint"] for region in clean_regions if region.get("fingerprint")
@@ -308,7 +380,7 @@ def latest_case_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for run in sorted(runs, key=lambda item: str(item.get("run", ""))):
         case_name = run.get("case")
-        if case_name in {"baseline", "single-queue", "no-descriptor-buffer", "sync"}:
+        if case_name in CASES:
             latest[case_name] = run
     return sorted(latest.values(), key=lambda run: str(run.get("run", "")))
 
@@ -339,6 +411,20 @@ def build_evidence(runs: list[dict[str, Any]]) -> dict[str, list[str]]:
             f"device lost was {'observed' if run['device_lost'] else 'not observed'}; "
             f"{len(run['regions'])} breadcrumb crash region(s) were parsed; {validity}."
         )
+        for fault in run.get("descriptor_qa_faults", []):
+            desired = fault.get("desired_descriptor_type") or {}
+            found = fault.get("found_descriptor_type") or {}
+            observed.append(
+                f"{run['run']}: descriptor QA reported "
+                f"{', '.join(fault.get('fault_types', [])) or 'an unspecified fault'}; "
+                f"shader {fault.get('shader_hash', 'unknown')} instruction "
+                f"{fault.get('instruction_id', 'unknown')}; descriptor heap cookie "
+                f"{fault.get('descriptor_heap_cookie', 'unknown')}; resource/view cookie "
+                f"{fault.get('resource_view_cookie', 'unknown')}; desired descriptor type "
+                f"{desired.get('value', 'unknown')} ({desired.get('name', 'unknown')}), found "
+                f"{found.get('value', 'unknown')} ({found.get('name', 'unknown')}); failed heap "
+                f"index {fault.get('failed_heap_index', 'unknown')}."
+            )
 
     for run in latest_case_runs(runs):
         by_case[run["case"]].append(run)
@@ -347,6 +433,16 @@ def build_evidence(runs: list[dict[str, Any]]) -> dict[str, list[str]]:
     if baseline_failures:
         baseline = baseline_failures[-1]
         for case_name, stable_text, fail_text in (
+            (
+                "descriptor-qa",
+                "Descriptor QA instrumentation did not reproduce the Xid in the observation window; instrumentation changes timing and is not proof that descriptor access is valid.",
+                "The failure survives GPU-assisted descriptor QA instrumentation; inspect any reported descriptor faults directly.",
+            ),
+            (
+                "descriptor-heap",
+                "The known-stable descriptor-heap path did not reproduce the Xid; descriptor-path selection or its timing becomes a stronger lead.",
+                "The failure also occurs on the descriptor-heap path, so the default descriptor-buffer path is less likely to be the sole trigger.",
+            ),
             (
                 "single-queue",
                 "Queue topology or timing may influence reproduction; this does not prove an asynchronous-queue bug.",
@@ -807,6 +903,38 @@ def markdown(runs: list[dict[str, Any]], evidence: dict[str, list[str]], candida
     for heading in ("observed", "inferred", "proven"):
         lines.extend(["", f"## {heading.upper()}", ""])
         lines.extend(f"- {item}" for item in evidence[heading])
+    lines.extend(["", "## Descriptor QA faults", ""])
+    descriptor_fault_rows = []
+    for run in runs:
+        for fault in run.get("descriptor_qa_faults", []):
+            desired = fault.get("desired_descriptor_type") or {}
+            found = fault.get("found_descriptor_type") or {}
+            descriptor_fault_rows.append(
+                "| " + " | ".join(
+                    [
+                        cell(run["case"]),
+                        cell(fault.get("fault_types")),
+                        cell(fault.get("shader_hash")),
+                        cell(fault.get("instruction_id")),
+                        cell(fault.get("descriptor_heap_cookie")),
+                        cell(fault.get("resource_view_cookie")),
+                        cell(f"{desired.get('value', '—')} ({desired.get('name', '—')})"),
+                        cell(f"{found.get('value', '—')} ({found.get('name', '—')})"),
+                        cell(fault.get("failed_heap_index")),
+                        cell(fault.get("shader_dump_files")),
+                    ]
+                ) + " |"
+            )
+    if descriptor_fault_rows:
+        lines.extend(
+            [
+                "| Case | Fault type(s) | Shader hash | Instruction ID | Descriptor heap cookie | Resource/view cookie | Desired type | Found type | Failed heap index | Shader dumps |",
+                "|---|---|---|---:|---:|---:|---|---|---:|---|",
+                *descriptor_fault_rows,
+            ]
+        )
+    else:
+        lines.append("No descriptor QA faults were parsed from the captured logs.")
     lines.extend(["", "## Candidate bundle", ""])
     if candidate:
         lines.append(

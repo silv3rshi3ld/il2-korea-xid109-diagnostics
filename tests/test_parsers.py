@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from analyzer.parsers import (  # noqa: E402
     extract_breadcrumb_report,
+    parse_descriptor_qa_faults,
     parse_kernel_log,
     parse_proton_log,
     parse_vkd3d_log,
@@ -118,6 +119,49 @@ class Vkd3dParserTests(unittest.TestCase):
         )["regions"][0]
         self.assertNotEqual(first["events"], second["events"])
         self.assertEqual(first["fingerprint"], second["fingerprint"])
+
+    def test_parses_descriptor_qa_fault_fields(self) -> None:
+        faults = parse_descriptor_qa_faults(
+            (FIXTURES / "vkd3d-descriptor-qa.log").read_text()
+        )
+        self.assertEqual(len(faults), 2)
+        fault = faults[0]
+        self.assertEqual(
+            fault["fault_types"],
+            ["HEAP_OUT_OF_RANGE", "MISMATCH_DESCRIPTOR_TYPE"],
+        )
+        self.assertEqual(fault["shader_hash"], "edbaf1b5ed344467")
+        self.assertEqual(fault["instruction_id"], 1)
+        self.assertEqual(fault["descriptor_heap_cookie"], 1800)
+        self.assertEqual(fault["resource_view_cookie"], 1802)
+        self.assertEqual(
+            fault["desired_descriptor_type"],
+            {"value": 8, "name": "STORAGE_BUFFER"},
+        )
+        self.assertEqual(
+            fault["found_descriptor_type"],
+            {"value": 1, "name": "SAMPLED_IMAGE"},
+        )
+        self.assertEqual(fault["failed_heap_index"], 1024000)
+
+    def test_vkd3d_parser_detects_inline_descriptor_fault(self) -> None:
+        text = (FIXTURES / "vkd3d-descriptor-qa.log").read_text()
+        self.assertEqual(len(parse_vkd3d_log(text)["descriptor_qa_faults"]), 2)
+
+    def test_descriptor_type_name_can_contain_parentheses(self) -> None:
+        faults = parse_descriptor_qa_faults(
+            "Fault type: MISMATCH_DESCRIPTOR_TYPE\n"
+            "CBV_SRV_UAV heap cookie: 1\n"
+            "Shader hash and instruction: 12345678 (2)\n"
+            "Accessed resource/view cookie: 3\n"
+            "Shader desired descriptor type: 72 (STORAGE_TEXEL_BUFFER / STORAGE_BUFFER (w/ counter))\n"
+            "Found descriptor type in heap: 0 (NONE)\n"
+            "Failed heap index: 4\n"
+        )
+        self.assertEqual(
+            faults[0]["desired_descriptor_type"]["name"],
+            "STORAGE_TEXEL_BUFFER / STORAGE_BUFFER (w/ counter)",
+        )
 
 
 if __name__ == "__main__":

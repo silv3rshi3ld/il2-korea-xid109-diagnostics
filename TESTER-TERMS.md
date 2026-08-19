@@ -1,6 +1,6 @@
 # Tester safety, privacy, and participation terms
 
-Notice version: `2026-08-16.2`
+Notice version: `2026-08-19.1`
 
 Read this document before installing or running the prepared diagnostic tool. It is a plain-language participation notice, not a substitute for legal advice.
 
@@ -56,7 +56,8 @@ Normal run captures can contain:
 - local paths that can include a username or hostname;
 - Steam, Proton, VKD3D-Proton, Wine, and game command information;
 - kernel messages from the run window, including NVIDIA Xid events and possibly unrelated device or network identifiers;
-- D3D12 shader bytecode dumped from the game, such as DXIL, DXBC, or SPIR-V; and
+- D3D12 shader bytecode dumped from the game, such as DXIL, DXBC, or SPIR-V;
+- for the descriptor-QA case, descriptor heap/update records, numeric descriptor and resource/view cookies, descriptor types, shader hashes, instruction IDs, and failed heap indices; and
 - timestamps, READY observation timing, case settings, process exit state, and diagnostic build/install provenance.
 
 The optional `nvidia-bug-report.sh` output is substantially broader and can include additional system configuration and logs. It is always excluded from the normal results archive and must be handled separately.

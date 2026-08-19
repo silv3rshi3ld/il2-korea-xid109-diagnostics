@@ -122,6 +122,14 @@ if [[ ! -f $run_dir/vkd3d.log ]]; then
 elif [[ ! -s $run_dir/vkd3d.log ]]; then
     add_warning 'VKD3D log is empty'
 fi
+if grep -Fq '"case": "descriptor-qa"' "$run_dir/metadata.json" 2>/dev/null; then
+    if [[ ! -f $run_dir/descriptor-qa.log ]]; then
+        add_warning 'descriptor QA log was not created'
+        : >"$run_dir/descriptor-qa.log"
+    elif [[ ! -s $run_dir/descriptor-qa.log ]]; then
+        add_warning 'descriptor QA log is empty'
+    fi
+fi
 
 journal_cursor=''
 if [[ -r $run_dir/journal-cursor-start.txt ]]; then

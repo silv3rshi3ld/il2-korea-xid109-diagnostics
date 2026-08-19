@@ -67,11 +67,13 @@ class WorkflowStatusTests(unittest.TestCase):
             else "synthetic VKD3D log without a device loss\n"
         )
         (run / "proton.log").write_text("synthetic Proton log\n")
+        if case == "descriptor-qa":
+            (run / "descriptor-qa.log").write_text("REGISTER HEAP 1 || COUNT = 1\n")
         (run / (".capture-complete" if complete else ".capture-in-progress")).touch()
         (run / ".observation-start-recorded").touch()
         return run
 
-    def test_failure_baseline_advances_to_single_queue(self) -> None:
+    def test_failure_baseline_advances_to_descriptor_qa(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             self.make_run(
@@ -82,7 +84,22 @@ class WorkflowStatusTests(unittest.TestCase):
             )
             with mock.patch.object(workflow_status, "RESULTS", root):
                 runs, _, order = workflow_status.all_runs()
-            self.assertEqual(workflow_status.next_action(runs, order), "single-queue")
+            self.assertEqual(workflow_status.next_action(runs, order), "descriptor-qa")
+
+    def test_descriptor_qa_case_requires_its_dedicated_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run = self.make_run(
+                root,
+                "2026-08-15T120000Z-descriptor-qa",
+                "descriptor-qa",
+                xid109=True,
+            )
+            (run / "descriptor-qa.log").unlink()
+            inspected = workflow_status.inspect_run(run, 600)
+            self.assertFalse(inspected["usable_failure"])
+            self.assertTrue(inspected["review_required"])
+            self.assertIn("descriptor-qa.log is missing or empty", inspected["state"])
 
     def test_failure_before_ready_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

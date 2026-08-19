@@ -6,7 +6,7 @@ This applies to the collector, not to Steam or IL-2. The harness does not block 
 
 ## Normal result archive
 
-`./il2-diagnostic.sh finish` creates a file whose name begins with `PRIVATE-`. It can contain local paths, system and GPU identifiers, kernel messages, Proton/VKD3D logs, game command information, and game shader bytecode.
+`./il2-diagnostic.sh finish` creates a file whose name begins with `PRIVATE-`. It can contain local paths, system and GPU identifiers, kernel messages, Proton/VKD3D logs, game command information, game shader bytecode, and descriptor-QA heap/update records with numeric descriptor and resource/view cookies.
 
 The `PRIVATE-` prefix is only a warning label. **The archive is not encrypted or password-protected**, and its `.sha256` checksum does not hide its contents. Anyone who receives the archive can read the evidence. It is intended for private diagnostic transfer to the identified investigation coordinator, not public posting.
 

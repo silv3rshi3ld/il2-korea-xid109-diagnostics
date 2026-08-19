@@ -20,7 +20,7 @@ usage() {
         'Usage: ./build/build-vkd3d-diag.sh [--source PATH]' \
         '' \
         'Builds the exact failing VKD3D-Proton revision as release binaries with' \
-        'trace/breadcrumb support and one report-only queue-label patch.' \
+        'trace/breadcrumb and descriptor-QA support with one report-only queue-label patch.' \
         '--source seeds the private build checkout from a local Git clone; it is not modified.'
 }
 
@@ -150,12 +150,12 @@ configure_arch() {
     if [[ -f $build_dir/meson-private/coredata.dat ]]; then
         meson setup --reconfigure "$build_dir" "$source_dir" \
             --cross-file "$source_dir/$cross_file" \
-            --buildtype=release --strip -Denable_trace=true \
+            --buildtype=release --strip -Denable_trace=true -Denable_descriptor_qa=true \
             --prefix "$prefix_dir" --bindir "$bindir" --libdir "$bindir"
     else
         meson setup "$build_dir" "$source_dir" \
             --cross-file "$source_dir/$cross_file" \
-            --buildtype=release --strip -Denable_trace=true \
+            --buildtype=release --strip -Denable_trace=true -Denable_descriptor_qa=true \
             --prefix "$prefix_dir" --bindir "$bindir" --libdir "$bindir"
     fi
     ninja -C "$build_dir" install

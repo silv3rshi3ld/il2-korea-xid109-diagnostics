@@ -60,6 +60,7 @@ class BuildVerifierTests(unittest.TestCase):
             "build": {
                 "buildtype": "release",
                 "enable_trace": True,
+                "enable_descriptor_qa": True,
                 "strip": True,
                 "meson_arguments": source_lock["build"]["meson_arguments"],
                 "source_date_epoch": source_lock["build"]["source_date_epoch"],

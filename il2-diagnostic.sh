@@ -92,10 +92,10 @@ cmd_next() {
             ;;
         COMPLETE)
             printf '%s\n' \
-                'All four controlled cases have a conclusive capture.' \
+                'All six controlled cases have a conclusive capture.' \
                 'Run: ./il2-diagnostic.sh finish'
             ;;
-        baseline|single-queue|no-descriptor-buffer|sync)
+        baseline|descriptor-qa|descriptor-heap|single-queue|no-descriptor-buffer|sync)
             "$control" select "$action"
             print_run_instructions "$action"
             ;;

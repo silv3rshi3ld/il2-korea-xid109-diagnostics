@@ -23,13 +23,13 @@ usage() {
         '  install                Create the isolated compatibility tool' \
         '  uninstall              Disable the custom tool without deleting it' \
         '  trash-copy             Move recognized disabled custom copies to desktop Trash' \
-        '  select CASE            Select baseline, single-queue, no-descriptor-buffer, or sync' \
+        '  select CASE            Select one case from the controlled six-run matrix' \
         '  ready                  Start the observation timer after the hangar is fully rendered' \
         '  recover                Finalize captures interrupted by a freeze or reboot' \
         '  status                 Show installation, selected case, and captured runs' \
         '  analyze                Write results/analysis-summary.{md,json}' \
         '  pack                   Analyze and create a shareable results archive' \
-        '  cases                  List the controlled four-run matrix'
+        '  cases                  List the controlled six-run matrix'
 }
 
 pass() { printf '[PASS] %s\n' "$*"; }
@@ -130,7 +130,7 @@ cmd_doctor() {
 
     if [[ -f $build_manifest ]] && python3 "$script_dir/verify-build.py" \
         --manifest "$build_manifest" --artifact-root "$artifact_root" >/dev/null 2>&1; then
-        pass 'diagnostic DLL hashes and release+trace manifest verify'
+        pass 'diagnostic DLL hashes and release+trace+descriptor-QA manifest verify'
     else
         fail 'prepared diagnostic DLLs or their manifest are missing/invalid'
         printf '%s\n' \
@@ -199,6 +199,12 @@ cmd_doctor() {
             fail 'VK_EXT_descriptor_buffer is not exposed; the disable case would not be a discriminator'
             failures=$((failures + 1))
         fi
+        if grep -Fq 'VK_EXT_descriptor_heap' <<<"$extension_output"; then
+            pass 'VK_EXT_descriptor_heap is exposed for the known-stable descriptor-heap case'
+        else
+            fail 'VK_EXT_descriptor_heap is not exposed; the descriptor-heap comparison cannot run'
+            failures=$((failures + 1))
+        fi
         if grep -Fq 'VK_EXT_device_fault' <<<"$extension_output"; then
             warn 'VK_EXT_device_fault is exposed but intentionally not enabled in the default matrix'
         fi
@@ -220,7 +226,7 @@ cmd_doctor() {
         if [[ $baseline_kib =~ ^[0-9]+$ && $available_kib =~ ^[0-9]+$ &&
               $results_kib =~ ^[0-9]+$ ]] && ((available_kib > required_kib)) &&
             ((results_kib > IL2_DIAG_RESULTS_HEADROOM_KIB)); then
-            pass 'space is available for the isolated Proton copy and four diagnostic runs'
+            pass 'space is available for the isolated Proton copy and six diagnostic runs'
         else
             fail 'insufficient free space (reserve the Proton copy plus 8 GiB for results)'
             failures=$((failures + 1))

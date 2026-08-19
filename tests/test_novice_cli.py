@@ -70,7 +70,14 @@ class NoviceCliTests(unittest.TestCase):
             kernel = (fixture_root / "kernel-xid109.log").read_text()
             vkd3d = (fixture_root / "vkd3d-breadcrumb.log").read_text()
             proton = (fixture_root / "proton-device-lost.log").read_text()
-            cases = ["baseline", "single-queue", "no-descriptor-buffer", "sync"]
+            cases = [
+                "baseline",
+                "descriptor-qa",
+                "descriptor-heap",
+                "single-queue",
+                "no-descriptor-buffer",
+                "sync",
+            ]
             for index, case in enumerate(cases):
                 run = repo / "results" / f"2026-08-15T120{index}00Z-{case}"
                 run.mkdir()
@@ -98,6 +105,10 @@ class NoviceCliTests(unittest.TestCase):
                     json.dumps({"events": parse_kernel_log(kernel)})
                 )
                 (run / "shader-manifest.json").write_text('{"shaders": []}\n')
+                if case == "descriptor-qa":
+                    (run / "descriptor-qa.log").write_text(
+                        "REGISTER HEAP 1 || COUNT = 1\n"
+                    )
                 if index == 0:
                     (run / "observation-start-utc.txt.tmp.123").write_text(
                         "unfinished READY write\n"

@@ -1,0 +1,17 @@
+REGISTER HEAP 1800 || COUNT = 1024 || SHADER || CBV_SRV_UAV
+Fault type: HEAP_OUT_OF_RANGE
+Fault type: MISMATCH_DESCRIPTOR_TYPE
+CBV_SRV_UAV heap cookie: 1800
+Shader hash and instruction: edbaf1b5ed344467 (1)
+Accessed resource/view cookie: 1802
+Shader desired descriptor type: 8 (STORAGE_BUFFER)
+Found descriptor type in heap: 1 (SAMPLED_IMAGE)
+Failed heap index: 1024000
+
+Fault type: MISMATCH_DESCRIPTOR_TYPE
+CBV_SRV_UAV heap cookie: 1900
+Shader hash and instruction: 0123456789abcdef (27)
+Accessed resource/view cookie: 1902
+Shader desired descriptor type: 2 (STORAGE_IMAGE)
+Found descriptor type in heap: 4 (UNIFORM_BUFFER)
+Failed heap index: 93

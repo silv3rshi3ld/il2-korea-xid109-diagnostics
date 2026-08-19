@@ -47,7 +47,7 @@ validate_results_tree() {
                 return 1
                 ;;
             *)
-                if [[ -d $entry && $name =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-(baseline|single-queue|no-descriptor-buffer|sync)(-[0-9]+)?$ ]]; then
+                if [[ -d $entry && $name =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z-(baseline|descriptor-qa|descriptor-heap|single-queue|no-descriptor-buffer|sync)(-[0-9]+)?$ ]]; then
                     continue
                 fi
                 printf 'error: unrecognized top-level result entry will not be archived: %s\n' \

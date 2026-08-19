@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in os.sys.path:
 
 from analyzer.parsers import (  # noqa: E402
     extract_breadcrumb_report,
+    parse_descriptor_qa_faults,
     parse_kernel_log,
     parse_proton_log,
     parse_vkd3d_log,
@@ -62,6 +63,8 @@ def command_init(args: argparse.Namespace) -> int:
             "VKD3D_DISABLE_EXTENSIONS": args.disabled_extensions or None,
             "VKD3D_DEBUG": "info",
             "VKD3D_SHADER_DEBUG": "err",
+            "VKD3D_SHADER_DUMP_PATH": "shaders",
+            "VKD3D_DESCRIPTOR_QA_LOG": args.descriptor_qa_log or None,
             "PROTON_LOG": "1",
         },
         "start_utc": args.start,
@@ -192,6 +195,12 @@ def command_summary(args: argparse.Namespace) -> int:
     proton_text = (run_dir / "proton.log").read_text(encoding="utf-8", errors="replace") \
         if (run_dir / "proton.log").is_file() else ""
     vkd3d = parse_vkd3d_log(vkd3d_text)
+    descriptor_qa_text = (run_dir / "descriptor-qa.log").read_text(
+        encoding="utf-8", errors="replace"
+    ) if (run_dir / "descriptor-qa.log").is_file() else ""
+    descriptor_faults = parse_descriptor_qa_faults(descriptor_qa_text)
+    if not descriptor_faults:
+        descriptor_faults = vkd3d["descriptor_qa_faults"]
     proton = parse_proton_log(proton_text)
     regions = vkd3d["regions"]
 
@@ -211,6 +220,7 @@ def command_summary(args: argparse.Namespace) -> int:
         f"- VK_ERROR_DEVICE_LOST/device removed: {'yes' if vkd3d['device_lost'] or proton['device_lost'] else 'no'}",
         f"- Breadcrumb crash regions: {len(regions)}",
         f"- Dumped shaders: {len(load_json(run_dir / 'shader-manifest.json', {'shaders': []}).get('shaders', []))}",
+        f"- Descriptor QA faults: {len(descriptor_faults)}",
         f"- Capture interrupted/recovered: "
         f"{'yes' if metadata.get('capture_interrupted') or metadata.get('recovered_after_interruption') else 'no'}",
     ]
@@ -231,6 +241,18 @@ def command_summary(args: argparse.Namespace) -> int:
         lines.append(
             "- Region shader hashes: "
             + (", ".join(shader["hash"] for shader in region["shaders"]) or "none parsed")
+        )
+    for fault in descriptor_faults:
+        desired = fault.get("desired_descriptor_type") or {}
+        found = fault.get("found_descriptor_type") or {}
+        lines.append(
+            "- Descriptor QA fault: "
+            f"{', '.join(fault.get('fault_types', []))}; shader {fault.get('shader_hash')} "
+            f"instruction {fault.get('instruction_id')}; descriptor heap cookie "
+            f"{fault.get('descriptor_heap_cookie')}; resource/view cookie "
+            f"{fault.get('resource_view_cookie')}; desired type {desired.get('value')} "
+            f"({desired.get('name')}), found type {found.get('value')} ({found.get('name')}); "
+            f"failed heap index {fault.get('failed_heap_index')}"
         )
     lines.extend(
         [
@@ -256,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--description", required=True)
     init.add_argument("--vkd3d-config", required=True)
     init.add_argument("--disabled-extensions", default="")
+    init.add_argument("--descriptor-qa-log", default="")
     init.add_argument("--start", required=True)
     init.add_argument("--build-manifest", type=pathlib.Path, required=True)
     init.add_argument("--harness-commit", required=True)

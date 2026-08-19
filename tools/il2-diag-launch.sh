@@ -65,6 +65,7 @@ case_record=$(il2_diag_matrix_lookup "$matrix" "$selected_case") || {
     exit 1
 }
 IFS='|' read -r case_name vkd3d_config disabled_extensions case_description <<<"$case_record"
+descriptor_qa_log=''
 
 kernel_probe=$(journalctl -k -n 1 -o cat --no-pager 2>/dev/null || true)
 if [[ -z $kernel_probe ]]; then
@@ -111,6 +112,9 @@ for suffix in '' '-2' '-3' '-4' '-5' '-6' '-7' '-8' '-9'; do
     fi
 done
 [[ -n $run_dir ]] || { printf 'error: could not allocate a unique run directory\n' >&2; exit 1; }
+if [[ $case_name == descriptor-qa ]]; then
+    descriptor_qa_log="$run_dir/descriptor-qa.log"
+fi
 if ! mv -- "$authorization" "$run_dir/run-authorization.txt"; then
     rmdir -- "$run_dir"
     record_launch_error 'the one-use launch authorization could not be consumed'
@@ -149,6 +153,7 @@ python3 "$repo_dir/tools/run-artifacts.py" init \
     --description "$case_description" \
     --vkd3d-config "$vkd3d_config" \
     --disabled-extensions "$disabled_extensions" \
+    --descriptor-qa-log "${descriptor_qa_log:+descriptor-qa.log}" \
     --start "$start_utc" \
     --build-manifest "$state_dir/build-manifest.json" \
     --harness-commit "$harness_commit"
@@ -169,6 +174,11 @@ export VKD3D_DEBUG=info
 export VKD3D_SHADER_DEBUG=err
 export VKD3D_LOG_FILE="$run_dir/vkd3d.log"
 export VKD3D_SHADER_DUMP_PATH="$run_dir/shaders"
+if [[ -n $descriptor_qa_log ]]; then
+    export VKD3D_DESCRIPTOR_QA_LOG="$descriptor_qa_log"
+else
+    unset VKD3D_DESCRIPTOR_QA_LOG
+fi
 if [[ -n $disabled_extensions ]]; then
     export VKD3D_DISABLE_EXTENSIONS="$disabled_extensions"
 else
@@ -189,6 +199,7 @@ unset VKD3D_VULKAN_DEVICE VKD3D_FILTER_DEVICE_NAME
     printf 'VKD3D_SHADER_DEBUG=%s\n' "$VKD3D_SHADER_DEBUG"
     printf 'VKD3D_LOG_FILE=%s\n' "$VKD3D_LOG_FILE"
     printf 'VKD3D_SHADER_DUMP_PATH=%s\n' "$VKD3D_SHADER_DUMP_PATH"
+    printf 'VKD3D_DESCRIPTOR_QA_LOG=%s\n' "${VKD3D_DESCRIPTOR_QA_LOG:-unset}"
     printf 'VKD3D_DISABLE_EXTENSIONS=%s\n' "${VKD3D_DISABLE_EXTENSIONS:-unset}"
     printf 'VKD3D_VULKAN_DEVICE=unset-by-harness\n'
     printf 'VKD3D_FILTER_DEVICE_NAME=unset-by-harness\n'

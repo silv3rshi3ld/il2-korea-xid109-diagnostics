@@ -92,6 +92,7 @@ class InstallationIntegrationTests(unittest.TestCase):
                         "build": {
                             "buildtype": "release",
                             "enable_trace": True,
+                            "enable_descriptor_qa": True,
                             "strip": True,
                             "meson_arguments": source_lock["build"]["meson_arguments"],
                             "source_date_epoch": source_lock["build"]["source_date_epoch"],
@@ -128,6 +129,8 @@ class InstallationIntegrationTests(unittest.TestCase):
                 "'===== Potential crash region END =====' "
                 "'Done analyzing breadcrumbs ...' >\"$VKD3D_LOG_FILE\"\n"
                 "printf '%s' synthetic >\"$VKD3D_SHADER_DUMP_PATH/0123456789abcdef.dxil\"\n"
+                "if [[ -n ${VKD3D_DESCRIPTOR_QA_LOG:-} ]]; then "
+                "printf '%s\\n' 'REGISTER HEAP 1 || COUNT = 1' >\"$VKD3D_DESCRIPTOR_QA_LOG\"; fi\n"
                 "if [[ ${SYNTHETIC_BLOCK:-0} == 1 ]]; then "
                 "trap 'exit 143' TERM INT HUP; while :; do sleep 1; done; fi\n"
                 "exit 0\n",
@@ -158,7 +161,7 @@ class InstallationIntegrationTests(unittest.TestCase):
             )
             make_executable(
                 fake_bin / "vulkaninfo",
-                "#!/usr/bin/env bash\nprintf '%s\\n' VK_NV_device_diagnostic_checkpoints VK_EXT_descriptor_buffer\n",
+                "#!/usr/bin/env bash\nprintf '%s\\n' VK_NV_device_diagnostic_checkpoints VK_EXT_descriptor_buffer VK_EXT_descriptor_heap\n",
             )
             make_executable(fake_bin / "pgrep", "#!/usr/bin/env bash\nexit 1\n")
             make_executable(
@@ -212,7 +215,7 @@ class InstallationIntegrationTests(unittest.TestCase):
             install_manifest = json.loads(
                 (tool / ".il2-xid109-diagnostic/install-manifest.json").read_text()
             )
-            self.assertEqual(install_manifest["tester_notice"]["terms_version"], "2026-08-16.2")
+            self.assertEqual(install_manifest["tester_notice"]["terms_version"], "2026-08-19.1")
 
             wayland_env = dict(env)
             wayland_env["XDG_SESSION_TYPE"] = "wayland"
@@ -227,7 +230,7 @@ class InstallationIntegrationTests(unittest.TestCase):
             self.assertIn("requires X11", wayland_select.stderr)
 
             select = subprocess.run(
-                [str(command), "select", "no-descriptor-buffer"],
+                [str(command), "select", "descriptor-qa"],
                 env=env,
                 text=True,
                 capture_output=True,
@@ -236,7 +239,7 @@ class InstallationIntegrationTests(unittest.TestCase):
             self.assertEqual(select.returncode, 0, select.stdout + select.stderr)
             self.assertEqual(
                 (tool / ".il2-xid109-diagnostic/selected-case").read_text().strip(),
-                "no-descriptor-buffer",
+                "descriptor-qa",
             )
 
             helper_env = dict(env)
@@ -278,6 +281,7 @@ class InstallationIntegrationTests(unittest.TestCase):
             self.assertTrue((run / "kernel-window.log").is_file())
             self.assertTrue((run / "xid-events.json").is_file())
             self.assertTrue((run / "shader-manifest.json").is_file())
+            self.assertTrue((run / "descriptor-qa.log").is_file())
             self.assertTrue((run / "run-summary.txt").is_file())
             self.assertTrue((run / "install-manifest.json").is_file())
             self.assertTrue((run / "proton-runtime-start-utc.txt").is_file())
@@ -287,11 +291,15 @@ class InstallationIntegrationTests(unittest.TestCase):
                 int((run / "start-epoch.txt").read_text()),
             )
             self.assertIn(
-                "VKD3D_DISABLE_EXTENSIONS=VK_EXT_descriptor_buffer",
+                f"VKD3D_DESCRIPTOR_QA_LOG={run}/descriptor-qa.log",
                 (run / "environment.txt").read_text(),
             )
             metadata = json.loads((run / "metadata.json").read_text())
             self.assertTrue(metadata["capture_complete"])
+            self.assertEqual(
+                metadata["diagnostic_environment"]["VKD3D_DESCRIPTOR_QA_LOG"],
+                "descriptor-qa.log",
+            )
             xid_events = json.loads((run / "xid-events.json").read_text())["events"]
             self.assertEqual(xid_events[0]["xid"], 109)
 

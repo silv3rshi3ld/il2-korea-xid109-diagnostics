@@ -478,6 +478,36 @@ class AnalyzerIntegrationTests(unittest.TestCase):
             self.assertIn("fully-rendered-hangar observation was 90 seconds", report)
             self.assertIn("| baseline | 90 |", report)
 
+    def test_descriptor_qa_faults_are_reported_with_shader_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_path = self.make_run(root, "2026-08-15T120000Z", "descriptor-qa")
+            (run_path / "descriptor-qa.log").write_text(
+                (FIXTURES / "vkd3d-descriptor-qa.log").read_text()
+            )
+            run = analysis.summarize_run(run_path)
+            self.assertEqual(len(run["descriptor_qa_faults"]), 2)
+            fault = run["descriptor_qa_faults"][1]
+            self.assertEqual(fault["fault_types"], ["MISMATCH_DESCRIPTOR_TYPE"])
+            self.assertEqual(fault["shader_hash"], "0123456789abcdef")
+            self.assertEqual(fault["instruction_id"], 27)
+            self.assertEqual(fault["descriptor_heap_cookie"], 1900)
+            self.assertEqual(fault["resource_view_cookie"], 1902)
+            self.assertEqual(fault["failed_heap_index"], 93)
+            self.assertEqual(
+                fault["shader_dump_files"],
+                [
+                    "shaders/0123456789abcdef.dxil",
+                    "shaders/0123456789abcdef.spv",
+                ],
+            )
+            evidence = analysis.build_evidence([run])
+            report = analysis.markdown([run], evidence, None)
+            self.assertIn("## Descriptor QA faults", report)
+            self.assertIn("HEAP_OUT_OF_RANGE, MISMATCH_DESCRIPTOR_TYPE", report)
+            self.assertIn("0123456789abcdef", report)
+            self.assertIn("93", report)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,8 @@
     "meson_arguments": [
       "--buildtype=release",
       "--strip",
-      "-Denable_trace=true"
+      "-Denable_trace=true",
+      "-Denable_descriptor_qa=true"
     ],
     "source_date_epoch": "1786468653",
     "source_date_epoch_from": "vkd3d-proton commit timestamp",

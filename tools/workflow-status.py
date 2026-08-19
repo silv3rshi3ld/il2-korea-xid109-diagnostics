@@ -18,8 +18,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from analyzer.parsers import parse_kernel_log, parse_proton_log, parse_vkd3d_log  # noqa: E402
+
+CASES = (
+    "baseline",
+    "descriptor-qa",
+    "descriptor-heap",
+    "single-queue",
+    "no-descriptor-buffer",
+    "sync",
+)
 RUN_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{6}Z-(baseline|single-queue|no-descriptor-buffer|sync)(?:-\d+)?$"
+    r"^\d{4}-\d{2}-\d{2}T\d{6}Z-(" + "|".join(CASES) + r")(?:-\d+)?$"
 )
 
 
@@ -134,6 +143,14 @@ def inspect_run(path: pathlib.Path, threshold: int) -> dict[str, Any]:
         and proton_path.is_file()
         and proton_path.stat().st_size
     )
+    descriptor_qa_log_present = bool(
+        path_case != "descriptor-qa"
+        or (
+            (path / "descriptor-qa.log").is_file()
+            and (path / "descriptor-qa.log").stat().st_size
+        )
+    )
+    expected_logs_present = expected_logs_present and descriptor_qa_log_present
     kernel_capture_complete = metadata.get("kernel_capture_complete") is True
     device_lost = bool(vkd3d["device_lost"] or proton["device_lost"])
     usable_regions = [
@@ -302,7 +319,10 @@ def inspect_run(path: pathlib.Path, threshold: int) -> dict[str, Any]:
         if not xid_cache_consistent:
             reasons.append("parsed Xid cache is missing, malformed, or inconsistent with the raw kernel log")
         if not expected_logs_present:
-            reasons.append("one or more required raw logs are missing or empty")
+            if path_case == "descriptor-qa" and not descriptor_qa_log_present:
+                reasons.append("descriptor-qa.log is missing or empty")
+            else:
+                reasons.append("one or more required raw logs are missing or empty")
         if not kernel_capture_complete:
             reasons.append("kernel journal collection was not verified as complete")
         if not metadata_fields_valid:
@@ -327,6 +347,7 @@ def inspect_run(path: pathlib.Path, threshold: int) -> dict[str, Any]:
         "device_lost": device_lost,
         "xid_cache_consistent": xid_cache_consistent,
         "kernel_capture_complete": kernel_capture_complete,
+        "descriptor_qa_log_present": descriptor_qa_log_present,
         "completion_values_valid": completion_values_valid,
         "complete": complete,
         "recoverable": recoverable,
@@ -350,7 +371,7 @@ def all_runs() -> tuple[list[dict[str, Any]], int, list[str]]:
         threshold = 600
     if threshold <= 0:
         threshold = 600
-    default_order = ["baseline", "single-queue", "no-descriptor-buffer", "sync"]
+    default_order = list(CASES)
     order = policy.get("recommended_case_order", default_order)
     if order != default_order:
         order = default_order

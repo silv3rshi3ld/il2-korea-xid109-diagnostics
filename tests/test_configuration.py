@@ -17,12 +17,21 @@ class ConfigurationTests(unittest.TestCase):
                 records.append(line.split("|"))
         self.assertEqual(
             [record[0] for record in records],
-            ["baseline", "single-queue", "no-descriptor-buffer", "sync"],
+            [
+                "baseline",
+                "descriptor-qa",
+                "descriptor-heap",
+                "single-queue",
+                "no-descriptor-buffer",
+                "sync",
+            ],
         )
         self.assertEqual(records[0][1:3], ["breadcrumbs", ""])
-        self.assertEqual(records[1][1:3], ["breadcrumbs,single_queue", ""])
-        self.assertEqual(records[2][1:3], ["breadcrumbs", "VK_EXT_descriptor_buffer"])
-        self.assertEqual(records[3][1:3], ["breadcrumbs_sync", ""])
+        self.assertEqual(records[1][1:3], ["breadcrumbs,descriptor_qa_checks", ""])
+        self.assertEqual(records[2][1:3], ["breadcrumbs,descriptor_heap", ""])
+        self.assertEqual(records[3][1:3], ["breadcrumbs,single_queue", ""])
+        self.assertEqual(records[4][1:3], ["breadcrumbs", "VK_EXT_descriptor_buffer"])
+        self.assertEqual(records[5][1:3], ["breadcrumbs_sync", ""])
         self.assertNotIn("Great Battles", (ROOT / "config/test-matrix.conf").read_text())
 
     def test_source_lock_and_patch_hash(self) -> None:
@@ -45,10 +54,16 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(source_lock["build"]["source_date_epoch"], "1786468653")
         self.assertEqual(source_lock["build"]["locale"], "C")
         self.assertEqual(source_lock["build"]["timezone"], "UTC")
+        self.assertIn("-Denable_descriptor_qa=true", source_lock["build"]["meson_arguments"])
 
     def test_runtime_matrix_does_not_enable_optional_fault_or_vk_debug(self) -> None:
         matrix = (ROOT / "config/test-matrix.conf").read_text()
-        self.assertNotIn("fault", matrix.lower())
+        configs = [
+            line.split("|")[1]
+            for line in matrix.splitlines()
+            if line and not line.startswith("#")
+        ]
+        self.assertNotIn("fault", ",".join(configs).split(","))
         self.assertNotIn("vk_debug", matrix.lower())
 
     def test_no_xid_policy_requires_ten_minutes(self) -> None:
@@ -56,13 +71,20 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(policy["no_xid_observation_seconds"], 600)
         self.assertEqual(
             policy["recommended_case_order"],
-            ["baseline", "single-queue", "no-descriptor-buffer", "sync"],
+            [
+                "baseline",
+                "descriptor-qa",
+                "descriptor-heap",
+                "single-queue",
+                "no-descriptor-buffer",
+                "sync",
+            ],
         )
 
     def test_tester_notice_and_third_party_boundaries_exist(self) -> None:
         terms = (ROOT / "TESTER-TERMS.md").read_text()
         notices = (ROOT / "THIRD-PARTY-NOTICES.md").read_text()
-        self.assertIn("Notice version: `2026-08-16.2`", terms)
+        self.assertIn("Notice version: `2026-08-19.1`", terms)
         self.assertIn("Nothing is uploaded automatically", terms)
         self.assertIn("GNU Lesser General Public License", notices)
         self.assertIn("corresponding-source", notices)

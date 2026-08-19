@@ -33,6 +33,21 @@ BEGIN = "Potential crash region BEGIN"
 END = "Potential crash region END"
 REPORT_BEGIN = "Device lost observed, analyzing breadcrumbs"
 REPORT_END = "Done analyzing breadcrumbs"
+DESCRIPTOR_FAULT_RE = re.compile(r"Fault type:\s*(?P<value>[A-Z][A-Z0-9_]+)")
+DESCRIPTOR_HEAP_COOKIE_RE = re.compile(r"CBV_SRV_UAV heap cookie:\s*(?P<value>\d+)")
+DESCRIPTOR_SHADER_RE = re.compile(
+    r"Shader hash and instruction:\s*(?P<hash>[0-9A-Fa-f]{8,16})\s*\((?P<instruction>\d+)\)"
+)
+DESCRIPTOR_RESOURCE_COOKIE_RE = re.compile(
+    r"Accessed resource/view cookie:\s*(?P<value>\d+)"
+)
+DESCRIPTOR_DESIRED_TYPE_RE = re.compile(
+    r"Shader desired descriptor type:\s*(?P<value>\d+)\s*\((?P<name>.+)\)\s*$"
+)
+DESCRIPTOR_FOUND_TYPE_RE = re.compile(
+    r"Found descriptor type in heap:\s*(?P<value>\d+)\s*\((?P<name>.+)\)\s*$"
+)
+DESCRIPTOR_FAILED_INDEX_RE = re.compile(r"Failed heap index:\s*(?P<value>\d+)")
 
 
 def _fingerprint(region: dict[str, Any]) -> str:
@@ -46,6 +61,52 @@ def _fingerprint(region: dict[str, Any]) -> str:
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def parse_descriptor_qa_faults(text: str) -> list[dict[str, Any]]:
+    """Parse complete GPU-assisted descriptor QA fault records.
+
+    The pinned VKD3D revision emits the same field block to its regular error
+    log and, when configured, to ``VKD3D_DESCRIPTOR_QA_LOG``. A fault can carry
+    more than one fault type, so records are completed by the final heap-index
+    field rather than by a second ``Fault type`` line.
+    """
+    faults: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        fault_match = DESCRIPTOR_FAULT_RE.search(line)
+        if fault_match:
+            if current is None:
+                current = {"fault_types": [], "start_line": line_number}
+            fault_type = fault_match.group("value")
+            if fault_type not in current["fault_types"]:
+                current["fault_types"].append(fault_type)
+            continue
+        if current is None:
+            continue
+        if match := DESCRIPTOR_HEAP_COOKIE_RE.search(line):
+            current["descriptor_heap_cookie"] = int(match.group("value"))
+        elif match := DESCRIPTOR_SHADER_RE.search(line):
+            current["shader_hash"] = match.group("hash").lower().zfill(16)
+            current["instruction_id"] = int(match.group("instruction"))
+        elif match := DESCRIPTOR_RESOURCE_COOKIE_RE.search(line):
+            current["resource_view_cookie"] = int(match.group("value"))
+        elif match := DESCRIPTOR_DESIRED_TYPE_RE.search(line):
+            current["desired_descriptor_type"] = {
+                "value": int(match.group("value")),
+                "name": match.group("name").strip(),
+            }
+        elif match := DESCRIPTOR_FOUND_TYPE_RE.search(line):
+            current["found_descriptor_type"] = {
+                "value": int(match.group("value")),
+                "name": match.group("name").strip(),
+            }
+        elif match := DESCRIPTOR_FAILED_INDEX_RE.search(line):
+            current["failed_heap_index"] = int(match.group("value"))
+            current["end_line"] = line_number
+            faults.append(current)
+            current = None
+    return faults
 
 
 def parse_vkd3d_log(text: str) -> dict[str, Any]:
@@ -145,6 +206,7 @@ def parse_vkd3d_log(text: str) -> dict[str, Any]:
         "breadcrumb_analysis": report_started,
         "breadcrumb_analysis_complete": report_complete,
         "regions": regions,
+        "descriptor_qa_faults": parse_descriptor_qa_faults(text),
     }
 
 

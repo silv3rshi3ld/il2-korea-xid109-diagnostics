@@ -17,7 +17,17 @@
     "build_started_utc": {"type": "string"},
     "build_finished_utc": {"type": "string"},
     "source": {"type": "object"},
-    "build": {"type": "object"},
+    "build": {
+      "type": "object",
+      "required": ["buildtype", "enable_trace", "enable_descriptor_qa", "strip", "meson_arguments"],
+      "properties": {
+        "buildtype": {"const": "release"},
+        "enable_trace": {"const": true},
+        "enable_descriptor_qa": {"const": true},
+        "strip": {"const": true},
+        "meson_arguments": {"type": "array", "items": {"type": "string"}}
+      }
+    },
     "toolchain": {"type": "object"},
     "artifacts": {
       "type": "array",

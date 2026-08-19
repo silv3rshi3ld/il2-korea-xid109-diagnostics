@@ -3,6 +3,8 @@
   "no_xid_observation_seconds": 600,
   "recommended_case_order": [
     "baseline",
+    "descriptor-qa",
+    "descriptor-heap",
     "single-queue",
     "no-descriptor-buffer",
     "sync"

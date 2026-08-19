@@ -30,6 +30,19 @@ Reporting NVIDIA checkpoints for direct|compute|copy queue N.
 
 A pipeline can set multiple shader hashes before a draw. A hash inside the region identifies relevant code; it does not identify which invocation stalled or whether the shader is defective.
 
+## Descriptor QA and descriptor heap paths
+
+The release diagnostic build explicitly uses `-Denable_descriptor_qa=true`, which defines the descriptor-QA support omitted by a default VKD3D-Proton build. Only the `descriptor-qa` case activates GPU-assisted checks with:
+
+```text
+VKD3D_CONFIG=breadcrumbs,descriptor_qa_checks
+VKD3D_DESCRIPTOR_QA_LOG=<run>/descriptor-qa.log
+```
+
+The dedicated log contains descriptor heap registrations, updates/copies, and any fault block. At this pin a complete fault ends with `Failed heap index` and can contain multiple `Fault type` lines, including `HEAP_OUT_OF_RANGE` and `MISMATCH_DESCRIPTOR_TYPE`. The remaining fields are the CBV/SRV/UAV heap cookie, shader hash and instruction ID, accessed resource/view cookie, desired and found descriptor types, and failed index. Shader dumping stays enabled so the reported hash can be resolved to retained DXIL/SPIR-V files.
+
+The separate `descriptor-heap` case uses `VKD3D_CONFIG=breadcrumbs,descriptor_heap`. This opts into `VK_EXT_descriptor_heap` and provides a direct comparison against the default `VK_EXT_descriptor_buffer` path without enabling descriptor-QA instrumentation.
+
 ## Logging levels
 
 Breadcrumb analysis uses error-level output. `info` additionally confirms configuration, device, and extension choices without enabling function-call traces. The harness uses:
@@ -47,7 +60,7 @@ VKD3D_SHADER_DEBUG=err
 
 ## Extension disablement
 
-`VKD3D_DISABLE_EXTENSIONS` is parsed as a comma/semicolon-separated debug list. `VK_EXT_descriptor_buffer` is the exact extension token used in Case D.
+`VKD3D_DISABLE_EXTENSIONS` is parsed as a comma/semicolon-separated debug list. `VK_EXT_descriptor_buffer` is the exact extension token used in the `no-descriptor-buffer` case.
 
 ## Optional device fault path
 

@@ -123,11 +123,13 @@ def main() -> int:
         "build": {
             "buildtype": "release",
             "enable_trace": True,
+            "enable_descriptor_qa": True,
             "strip": True,
             "meson_arguments": [
                 "--buildtype=release",
                 "--strip",
                 "-Denable_trace=true",
+                "-Denable_descriptor_qa=true",
             ],
             "source_date_epoch": os.environ.get("SOURCE_DATE_EPOCH", "unavailable"),
             "locale": os.environ.get("LC_ALL", "unavailable"),

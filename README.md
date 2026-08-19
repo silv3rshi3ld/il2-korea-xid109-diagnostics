@@ -55,12 +55,12 @@ You can run `./il2-diagnostic.sh` without another word to display a numbered men
 | Prepare | Save three Steam settings, select the required Proton build, and fully exit Steam. | Nothing runs. | Your Proton Experimental beta selection changes temporarily. |
 | Set up once | Run `setup`, read the notice, and type `I AGREE` only if you choose to participate. | Checks prerequisites, copies Proton, verifies the diagnostic files, and registers one local Steam compatibility tool. | Many `[PASS]` lines, followed by several minutes of copying that may be quiet. Official Steam-managed Proton files are not edited. |
 | Configure Steam once | Select **IL2 Xid109 Diagnostic** for IL-2 Korea only. | Waits until you launch the game. | Never select this tool for another game. |
-| Run cases | Run `next`, launch IL-2, enter the agreed hangar scene, run `ready`, and keep the scene unchanged for ten full minutes or until it fails. | Selects the proper case, authorizes one game launch, records READY timing, and captures Proton, VKD3D, shader, system, and kernel evidence. | Usually up to four conclusive cases; an invalid capture may require an automatically selected repeat. |
+| Run cases | Run `next`, launch IL-2, enter the agreed hangar scene, run `ready`, and keep the scene unchanged for ten full minutes or until it fails. | Selects the proper case, authorizes one game launch, records READY timing, and captures Proton, VKD3D, descriptor-QA, shader, system, and kernel evidence. | Usually up to six conclusive cases; an invalid capture may require an automatically selected repeat. |
 | Recover if needed | Use Steam Stop for a frozen game when the desktop responds, or restart if the whole desktop remains unusable. | Preserves and finalizes as much evidence as possible. | After a restart, run `recover` before launching the game again. |
 | Finish | Run `finish` only when the tool or coordinator directs you, then privately send the two new files and paste your visible-outcome notes as chat text. | Analyzes runs and creates one `PRIVATE-...` archive plus its `.sha256` checksum. | The files and notes remain on your computer until you send them. |
 | Restore | Run `uninstall`, restore the three saved Steam settings, and later run `trash-copy`. | Disables the private Proton copy and can move recognized disabled copies to desktop Trash. | Nothing is permanently deleted automatically. |
 
-Plan for about **60–90 minutes** when all four captures work the first time. A stable baseline can stop the matrix after one run. Freezes, restarts, reviews, or repeated inconclusive captures can make the test take longer and require more than four game launches.
+Plan for about **90–130 minutes** when all six captures work the first time. A stable baseline can stop the matrix after one run. Freezes, restarts, reviews, or repeated inconclusive captures can make the test take longer and require more than six game launches.
 
 You need free space for a complete private Proton copy **plus at least 8 GiB for evidence**. Eight GiB is a minimum reserve, not a maximum: per-run shader dumping has no fixed size cap and can consume more space.
 
@@ -88,7 +88,7 @@ The tool records two separate durations. Proton runtime starts before the hangar
 - The exact dated Proton Experimental Bleeding Edge build shown below.
 - Read access to the system kernel journal.
 - Free space for one complete Proton copy and at least 8 GiB of evidence, with additional space available if shader dumps grow.
-- About 60–90 minutes, possibly longer for restarts or repeated captures.
+- About 90–130 minutes, possibly longer for restarts or repeated captures.
 - A private way to contact the coordinator, preferably on a second device.
 
 The known failing control used X11. A Wayland run is not an equivalent control, and the checker stops on a non-X11 session. Ask the coordinator before changing login-session settings.
@@ -187,12 +187,14 @@ Never select this diagnostic compatibility tool for another game. Keep the extra
 
 ## Step 5 — perform the controlled cases
 
-The four possible cases are:
+The six possible cases are:
 
 1. `baseline` — ordinary failing workload with passive breadcrumbs
-2. `single-queue` — disables asynchronous compute and transfer queue use
-3. `no-descriptor-buffer` — disables only `VK_EXT_descriptor_buffer`
-4. `sync` — uses synchronized breadcrumb markers
+2. `descriptor-qa` — instruments descriptor accesses, writes a per-run descriptor update/fault log, and retains the corresponding shader dumps
+3. `descriptor-heap` — selects the known-stable `VK_EXT_descriptor_heap` path for direct comparison with the default descriptor-buffer path
+4. `single-queue` — disables asynchronous compute and transfer queue use
+5. `no-descriptor-buffer` — disables only `VK_EXT_descriptor_buffer`
+6. `sync` — uses synchronized breadcrumb markers
 
 The names are for the analysis; you do not choose among them. The tool selects the next required case or repeats the same case when a previous capture was inconclusive.
 
@@ -290,7 +292,7 @@ An NVIDIA report is broader and more privacy-sensitive than normal run logs. It 
 
 ## Step 6 — analyze and create the results archive
 
-Run `finish` after `next` reports that all four controlled cases are conclusive. If the baseline stayed stable, stop the matrix and use `finish` only when the coordinator asks you to package that stopped control run.
+Run `finish` after `next` reports that all six controlled cases are conclusive. If the baseline stayed stable, stop the matrix and use `finish` only when the coordinator asks you to package that stopped control run.
 
 ```bash
 ./il2-diagnostic.sh finish
@@ -375,7 +377,7 @@ After uninstalling, restoring Steam, and moving the disabled copy to Trash, you 
 
 - Diagnostic collection and environment variables are gated to IL-2 Korea AppID `247970`. The copied tool still contains the diagnostic VKD3D DLL, so never select it for another game.
 - It intercepts only real Proton `run` and `waitforexitandrun` actions, not helper queries.
-- It uses `PROTON_LOG=1`, VKD3D breadcrumbs, per-run shader dumping, and a live kernel-journal spool.
+- It uses `PROTON_LOG=1`, VKD3D breadcrumbs, per-run shader dumping, and a live kernel-journal spool. The descriptor-QA case additionally writes `descriptor-qa.log` inside that run only.
 - Every run receives a unique UTC `results/<timestamp>-<case>/` directory.
 - It records system, GPU, driver, Vulkan, session, Proton, VKD3D, command, kernel, timing, and build/install provenance information.
 - It never overwrites a prior captured run.
@@ -401,6 +403,9 @@ python3 tools/verify-build.py \
   --manifest build-manifest.json \
   --artifact-root build/output/vkd3d-proton-diag
 ```
+
+The build script pins the recorded VKD3D-Proton commit and enables both
+`-Denable_trace=true` and `-Denable_descriptor_qa=true` in its release build.
 
 After committing a clean, audited harness revision, create the tester archive:
 

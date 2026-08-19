@@ -1,6 +1,6 @@
 # Diagnostic design
 
-The design optimizes for maximum passive evidence per crash and four orthogonal Korea launches.
+The design optimizes for maximum passive evidence per crash and six controlled Korea launches.
 
 ```text
 IL-2 D3D12 workload
@@ -34,13 +34,17 @@ The harness never enables `VKD3D_DEBUG=trace` in the matrix. Trace support is co
 
 ## Behavioral discriminators
 
-Only one behavioral change is applied in each non-baseline case:
+The non-baseline cases isolate these diagnostic or behavioral changes:
 
-1. `single-queue`: adds `single_queue` to breadcrumbs.
-2. `no-descriptor-buffer`: disables exactly `VK_EXT_descriptor_buffer` while retaining ordinary queue behavior.
-3. `sync`: uses `breadcrumbs_sync`, which implies breadcrumbs and adds strong barriers.
+1. `descriptor-qa`: adds `descriptor_qa_checks` and a unique `VKD3D_DESCRIPTOR_QA_LOG=<run>/descriptor-qa.log`; normal per-run shader dumping remains enabled.
+2. `descriptor-heap`: adds `descriptor_heap` to select `VK_EXT_descriptor_heap` instead of the default descriptor-buffer path.
+3. `single-queue`: adds `single_queue` to breadcrumbs.
+4. `no-descriptor-buffer`: disables exactly `VK_EXT_descriptor_buffer` while retaining ordinary queue behavior.
+5. `sync`: uses `breadcrumbs_sync`, which implies breadcrumbs and adds strong barriers.
 
-The order places the high-value queue discriminator before the heavier synchronization case.
+The order places descriptor validation immediately after the failing default-path baseline, keeps the two alternate descriptor paths adjacent, and leaves the timing-heavy synchronization case last.
+
+The descriptor-QA log records descriptor heap/update history and GPU-assisted fault blocks. The analyzer parses each complete block, including multiple fault flags, shader hash, instruction ID, descriptor heap and resource/view cookies, desired and found descriptor types, and failed heap index. It associates the shader hash with files retained in the run's shader manifest.
 
 ## Per-run lifecycle
 

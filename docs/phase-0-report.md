@@ -36,7 +36,7 @@ Shader hashes are therefore present in breadcrumb reports when the relevant pipe
 
 ## 4. Required build flags
 
-`meson_options.txt` defines `enable_trace` as `auto`, `true`, or `false`. `auto` is enabled for `debug` and `debugoptimized` builds but disabled for a normal release build. Proton's own `UNSTRIPPED_BUILD` path explicitly adds `-Denable_trace=true` to VKD3D-Proton.
+`meson_options.txt` defines `enable_trace` as `auto`, `true`, or `false`. `auto` is enabled for `debug` and `debugoptimized` builds but disabled for a normal release build. Proton's own `UNSTRIPPED_BUILD` path explicitly adds `-Denable_trace=true` to VKD3D-Proton. Descriptor QA is independently disabled by default and must be compiled with `-Denable_descriptor_qa=true`.
 
 The diagnostic build uses:
 
@@ -44,6 +44,7 @@ The diagnostic build uses:
 --buildtype=release
 --strip
 -Denable_trace=true
+-Denable_descriptor_qa=true
 ```
 
 This avoids unrelated debug-build differences while retaining trace and breadcrumbs.
@@ -66,12 +67,15 @@ The target source does not integrate NVIDIA Aftermath or another proprietary cra
 | `VKD3D_CONFIG=breadcrumbs` | Enables breadcrumb command instrumentation |
 | `breadcrumbs_sync` | Implies breadcrumbs; ends the current render pass and inserts an all-commands write-to-read memory barrier at every signal |
 | `single_queue` | Avoids asynchronous compute and transfer queues |
+| `descriptor_qa_checks` | Enables GPU-assisted descriptor access instrumentation when descriptor QA was compiled in |
+| `descriptor_heap` | Opts into the `VK_EXT_descriptor_heap` path when supported |
 | `vk_debug` | Enables Vulkan debug extensions and loads the validation layer |
 | `fault` | Opts into `VK_EXT_device_fault` and address-binding reporting when supported |
 | `VKD3D_DEBUG` | `none`, `err`, `info`, `fixme`, `warn`, or `trace` |
 | `VKD3D_SHADER_DEBUG` | Same levels for shader compiler messages |
 | `VKD3D_LOG_FILE` | Redirects VKD3D debug output to the named file |
 | `VKD3D_SHADER_DUMP_PATH` | Dumps `$hash.{spv,dxbc,dxil}` |
+| `VKD3D_DESCRIPTOR_QA_LOG` | Writes descriptor heap/update records and descriptor-QA fault fields to the named file |
 | `VKD3D_VULKAN_DEVICE` | Zero-based physical-device index |
 | `VKD3D_FILTER_DEVICE_NAME` | Skips devices whose name lacks the substring |
 | `VKD3D_DISABLE_EXTENSIONS` | Comma/semicolon-separated exact Vulkan extension names |
@@ -112,7 +116,7 @@ hash: 0123456789abcdef, stage: ...
 Done analyzing breadcrumbs ...
 ```
 
-The source also supports opt-in `VKD3D_CONFIG=fault`. When the driver exposes `VK_EXT_device_fault`, it can log fault addresses/vendor records and write a vendor blob. It is intentionally excluded from the four default cases: the target code hard-codes `vkd3d-proton.fault.bin` in the game's working directory, and enabling driver fault/address instrumentation is less behavior-neutral than the selected baseline.
+The source also supports opt-in `VKD3D_CONFIG=fault`. When the driver exposes `VK_EXT_device_fault`, it can log fault addresses/vendor records and write a vendor blob. It is intentionally excluded from the six default cases: the target code hard-codes `vkd3d-proton.fault.bin` in the game's working directory, and enabling driver fault/address instrumentation is less behavior-neutral than the selected baseline.
 
 ## 10. Proton packaging
 

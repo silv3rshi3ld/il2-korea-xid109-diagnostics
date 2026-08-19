@@ -193,6 +193,7 @@ def main() -> int:
     if (
         build.get("buildtype") != "release"
         or build.get("enable_trace") is not True
+        or build.get("enable_descriptor_qa") is not True
         or build.get("strip") is not True
         or build.get("meson_arguments") != locked_build.get("meson_arguments")
         or build.get("source_date_epoch") != locked_build.get("source_date_epoch")
